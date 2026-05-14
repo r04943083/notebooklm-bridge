@@ -1,0 +1,40 @@
+# Secrets — never commit
+secrets/
+.env
+.env.local
+.env.*.local
+auth.json
+state.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+
+# Node / frontend
+node_modules/
+dist/
+build/
+.vite/
+*.tsbuildinfo
+
+# Logs & PID
+*.log
+.backend.log
+.frontend.log
+.backend.pid
+.frontend.pid
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
