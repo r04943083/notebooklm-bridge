@@ -36,8 +36,12 @@ router = APIRouter()
 def _coerce_citations(raw: Any) -> list[Citation]:
     """Tolerantly turn whatever the upstream returned into our Citation model.
 
-    notebooklm-py's exact citation type may differ between versions; we read by
-    attribute (or dict key) and fall back to empty strings rather than 500'ing.
+    notebooklm-py 0.4.x returns ``ChatReference`` objects with fields
+    ``source_id / citation_number / cited_text / start_char / end_char``. We
+    map those onto our older Citation schema so the frontend doesn't need to
+    care which upstream version the bridge is running against. Older releases
+    that used ``citations / source_title / text / page`` still work because we
+    look up either name via ``getattr``.
     """
     out: list[Citation] = []
     if not raw:
@@ -48,17 +52,23 @@ def _coerce_citations(raw: Any) -> list[Citation]:
                 Citation(
                     source_id=str(c.get("source_id", "")),
                     source_title=str(c.get("source_title", "")),
-                    text=str(c.get("text", "")),
-                    page=c.get("page"),
+                    text=str(c.get("cited_text") or c.get("text") or ""),
+                    page=c.get("citation_number") or c.get("page"),
                 )
             )
         else:
             out.append(
                 Citation(
                     source_id=str(getattr(c, "source_id", "")),
+                    # source_title is not present on notebooklm-py 0.4.x
+                    # ChatReference; the frontend's citation list shows the
+                    # source_id in that case until a future enrichment hop
+                    # joins it against /api/sources.
                     source_title=str(getattr(c, "source_title", "")),
-                    text=str(getattr(c, "text", "")),
-                    page=getattr(c, "page", None),
+                    text=str(
+                        getattr(c, "cited_text", None) or getattr(c, "text", "") or ""
+                    ),
+                    page=getattr(c, "citation_number", None) or getattr(c, "page", None),
                 )
             )
     return out
@@ -127,7 +137,9 @@ async def chat(
                 name = type(e).__name__
                 logger.warning("upstream error %s; tripping circuit", name)
                 store.trip_circuit()
-                if name == "AuthExpired":
+                # notebooklm-py 0.4.x renamed AuthExpired → AuthError; accept both
+                # so this code keeps working across upstream renames.
+                if name in ("AuthError", "AuthExpired"):
                     request.app.state.auth_valid = False
                 raise HTTPException(
                     status.HTTP_503_SERVICE_UNAVAILABLE, detail="上游异常,服务暂歇"
@@ -141,11 +153,17 @@ async def chat(
     if new_cid:
         store.set_session(user_id, req.notebook_id, new_cid)
 
+    # notebooklm-py 0.4.x: AskResult.references (was .citations) +
+    # AskResult.turn_number (was .turn). Read both names for forward / backward
+    # compatibility.
+    references = getattr(result, "references", None)
+    if references is None:
+        references = getattr(result, "citations", None)
     return ChatResponse(
         answer=str(getattr(result, "answer", "")),
-        citations=_coerce_citations(getattr(result, "citations", None)),
+        citations=_coerce_citations(references),
         conversation_id=new_cid,
-        turn=int(getattr(result, "turn", 1) or 1),
+        turn=int(getattr(result, "turn_number", None) or getattr(result, "turn", 1) or 1),
     )
 
 

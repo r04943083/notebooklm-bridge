@@ -33,7 +33,8 @@ class ChatResponse(BaseModel):
 class Notebook(BaseModel):
     id: str
     title: str
-    updated_at: str | None = None
+    created_at: str | None = None
+    sources_count: int | None = None
 
 
 class Source(BaseModel):

@@ -24,7 +24,7 @@ dependencies = [
 #   2. run `pip install -e '.[runtime]'`,
 #   3. update docs/notebooklm-py-integration.md if the API shape changed.
 runtime = [
-    "notebooklm-py>=0.0.0",  # placeholder — pin after Phase 1
+    "notebooklm-py==0.4.1",  # placeholder — pin after Phase 1
 ]
 dev = [
     "pytest>=8",

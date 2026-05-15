@@ -15,16 +15,17 @@ from typing import Any, Protocol
 
 
 class AskResult(Protocol):
+    # Fields per notebooklm-py 0.4.x AskResult; the bridge reads them via
+    # getattr so older / future shapes (e.g. `turn`, `citations`) still resolve.
     answer: str
-    citations: Any  # narrow once notebooklm-py is pinned and its citation type is known
     conversation_id: str
-    turn: int
+    turn_number: int
+    references: Any  # list[ChatReference]; not narrowed until upstream type is stable
 
 
 class ChatLike(Protocol):
     async def ask(
         self,
-        *,
         notebook_id: str,
         question: str,
         source_ids: list[str] | None = None,

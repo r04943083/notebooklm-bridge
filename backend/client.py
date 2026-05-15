@@ -54,18 +54,20 @@ def _import_notebooklm() -> tuple[Any, tuple[type[BaseException], ...]]:
 
     # Pull upstream exception classes if they exist; otherwise fall back to a
     # generic Exception tuple so chat.py never KeyErrors on a missing name.
+    # Class names follow notebooklm-py 0.4.x; if upstream renames, update the
+    # tuple here and the AuthError-string match in routes/chat.py.
     upstream_excs: list[type[BaseException]] = []
     try:
-        from notebooklm.errors import (
-            AuthExpired,
-            RateLimitedByGoogle,
-            UpstreamServerError,
+        from notebooklm.exceptions import (
+            AuthError,
+            RateLimitError,
+            ServerError,
         )
 
-        upstream_excs.extend([RateLimitedByGoogle, UpstreamServerError, AuthExpired])
+        upstream_excs.extend([RateLimitError, ServerError, AuthError])
     except ImportError:
         logger.warning(
-            "notebooklm.errors not available; using generic Exception for upstream errors"
+            "notebooklm.exceptions not available; using generic Exception for upstream errors"
         )
 
     return NotebookLMClient, tuple(upstream_excs)

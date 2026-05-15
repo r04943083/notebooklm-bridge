@@ -13,12 +13,12 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Any, TypeVar
 
-_T = TypeVar("_T")
-
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from ..auth import require_internal_user
 from ..schemas import Notebook, Source
+
+_T = TypeVar("_T")
 
 router = APIRouter()
 
@@ -63,14 +63,26 @@ async def list_notebooks(
 
     async def _load() -> list[Notebook]:
         items = await client.notebooks.list()
-        return [
-            Notebook(
-                id=getattr(it, "id", ""),
-                title=getattr(it, "title", ""),
-                updated_at=getattr(it, "updated_at", None),
+        out: list[Notebook] = []
+        for it in items:
+            created: Any = getattr(it, "created_at", None)
+            # notebooklm-py 0.4.x emits a datetime; serialise to ISO so the
+            # JSON response is deterministic and the frontend can sort.
+            if created is None:
+                created_str: str | None = None
+            elif hasattr(created, "isoformat"):
+                created_str = created.isoformat()
+            else:
+                created_str = str(created)
+            out.append(
+                Notebook(
+                    id=getattr(it, "id", ""),
+                    title=getattr(it, "title", ""),
+                    created_at=created_str,
+                    sources_count=getattr(it, "sources_count", None),
+                )
             )
-            for it in items
-        ]
+        return out
 
     return await _cache.get_or_set("notebooks:all", _load)
 

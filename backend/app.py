@@ -53,12 +53,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.upstream_exceptions = ()
     app.state.keepalive_task = None
 
+    # notebooklm-py 0.4.x's NotebookLMClient is an async context manager: its
+    # HTTP transport is only brought up on `__aenter__`. We use an AsyncExitStack
+    # so the same code path tears it down cleanly on shutdown, even if startup
+    # fell into degraded mode partway through.
+    stack = contextlib.AsyncExitStack()
+    await stack.__aenter__()
+    app.state._client_stack = stack
+
     # Best-effort upstream client construction. Any failure leaves the app running
     # in degraded mode and is reported via /api/healthz.
     try:
         _, upstream_excs = _import_notebooklm()
         app.state.upstream_exceptions = upstream_excs
-        app.state.client = await build_client(cfg)
+        raw_client = await build_client(cfg)
+        # Enter the client's async context — required for rpc_call() to work.
+        app.state.client = await stack.enter_async_context(raw_client)  # type: ignore[arg-type]
         app.state.auth_valid = True
         app.state.last_refresh_ts = time.time()
         logger.info("notebooklm client ready")
@@ -86,9 +96,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 await app.state.keepalive_task
         with contextlib.suppress(Exception):
             await app.state.store.flush()
-        if app.state.client is not None:
-            with contextlib.suppress(Exception):
-                await app.state.client.close()
+        # __aexit__ on the stack runs client.__aexit__ (closes HTTP transport)
+        # and any other deferred cleanup; safe to call unconditionally.
+        with contextlib.suppress(Exception):
+            await stack.__aexit__(None, None, None)
         logger.info("lifespan shutdown complete")
 
 

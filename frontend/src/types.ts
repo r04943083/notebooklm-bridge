@@ -24,7 +24,8 @@ export interface ChatResponse {
 export interface Notebook {
   id: string;
   title: string;
-  updated_at?: string | null;
+  created_at?: string | null;
+  sources_count?: number | null;
 }
 
 export interface Source {
