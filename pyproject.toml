@@ -1,0 +1,70 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "notebooklm-bridge"
+version = "0.1.0"
+description = "Internal HTTP + web bridge sharing one Google account's NotebookLM with an intranet team."
+requires-python = ">=3.11"
+readme = "README.md"
+authors = [{name = "yihonglu"}]
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+# notebooklm-py is intentionally placed in an optional extra so the dev install
+# can succeed before Phase 1 has validated the upstream version. After Phase 1:
+#   1. pin the actual version in this list (e.g. "notebooklm-py==0.3.2"),
+#   2. run `pip install -e '.[runtime]'`,
+#   3. update docs/notebooklm-py-integration.md if the API shape changed.
+runtime = [
+    "notebooklm-py>=0.0.0",  # placeholder — pin after Phase 1
+]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "asgi-lifespan>=2.1",
+    "respx>=0.21",          # kept for Phase 3 (feishu callback HTTP-level mocks)
+    "ruff>=0.7",
+    "mypy>=1.13",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["backend*"]
+exclude = ["tests*", "frontend*", "scripts*", "docs*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+filterwarnings = [
+    "error",
+    "ignore::DeprecationWarning:pydantic.*",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["frontend/**", "scripts/**"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "ASYNC"]
+# state.json is tiny (<10KB) and writes are debounced + locked; using plain
+# pathlib / os.path in our async flush is intentional. trio.Path / anyio.path
+# would add a dependency for no real concurrency benefit.
+ignore = ["ASYNC240"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["backend"]
+# notebooklm-py isn't pinned yet — its lazy-imported symbols are kept off the
+# typecheck surface via _notebooklm_protocol.py and `if TYPE_CHECKING` guards.
+ignore_missing_imports = true
