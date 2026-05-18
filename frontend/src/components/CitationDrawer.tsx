@@ -14,7 +14,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api } from "@/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import { useCitationViewer, useNotebookId, useSourceLookup } from "@/lib/chat-context";
 import { cn } from "@/lib/utils";
 import type { Citation, SourceFulltext } from "@/types";
@@ -155,20 +154,13 @@ export function CitationDrawer() {
           onInteractOutside={(e) => {
             e.preventDefault();
           }}
-          /* Floating drawer. Sits *under* the TopBar (h-3.5rem) with 12px
-           * gaps on the top / right / bottom so it visually detaches from
-           * the chrome edges. Rounded + full border + shadow gives it the
-           * same "card pane" feel as ChatPane / SourcesPanel. overflow-hidden
-           * is needed for the rounded corners to actually clip the inner
-           * header / ScrollArea / footer borders.
-           *
-           * `w-[calc(100vw-1.5rem)]` is the responsive cap so the drawer
-           * doesn't push off-screen on narrow viewports (1.5rem = right-3
-           * + left margin). max-w-[520px] still holds on wide screens. */
+          /* Edge-attached drawer (back to flush with the viewport's right
+           * edge, after the floating variant was rejected). The internal
+           * layout is what does the "no double scroll, only the fulltext
+           * scrolls" trick — see the JSX below. */
           className={cn(
-            "fixed bottom-3 right-3 top-[calc(3.5rem+0.75rem)] z-40 flex flex-col",
-            "w-[calc(100vw-1.5rem)] max-w-[520px]",
-            "overflow-hidden rounded-xl border border-border bg-card shadow-2xl",
+            "fixed inset-y-0 right-0 z-40 flex w-full max-w-[520px] flex-col",
+            "border-l border-border bg-card shadow-2xl",
             "data-[state=open]:animate-in data-[state=closed]:animate-out",
             "data-[state=open]:slide-in-from-right data-[state=closed]:slide-out-to-right"
           )}
@@ -191,46 +183,42 @@ export function CitationDrawer() {
             }
           />
 
-          {/* Native overflow-y-auto instead of Radix ScrollArea: the latter
-            * wraps children in a `display: table` viewport that swallowed the
-            * px-4 padding, making the inner fulltext card touch the drawer's
-            * right wall. Native scroll + `scrollbar-width: thin` (set in
-            * globals.css) keeps the visual lightweight without breaking the
-            * padding model. */}
-          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-            <div className="flex flex-col gap-4 p-4">
-              <SourceHeader
-                title={title}
-                url={source?.url ?? fulltext?.url ?? null}
-              />
+          {/* Fixed-height "title block" — never scrolls. Contains the source
+            * title + (in citation mode) the cited snippet card. Sits between
+            * DrawerHeader on top and the scrollable FulltextSection below. */}
+          <div className="shrink-0 space-y-3 border-b border-border px-4 py-3">
+            <SourceHeader
+              title={title}
+              url={source?.url ?? fulltext?.url ?? null}
+            />
 
-              {isCitation && citation && (
-                <>
-                  <CitedTextCard
-                    page={citation.page ?? null}
-                    text={citation.text ?? ""}
-                    onCopy={copyCited}
-                  />
-                  <Separator />
-                </>
-              )}
-
-              <FulltextSection
-                mode={active.mode}
-                loading={loading}
-                error={error}
-                hasFulltext={!!fulltext}
-                charCount={fulltext?.char_count}
-                slices={slices}
-                markRef={markRef}
-                onRetry={loadFulltext}
-                citedText={citation?.text}
+            {isCitation && citation && (
+              <CitedTextCard
+                page={citation.page ?? null}
+                text={citation.text ?? ""}
+                onCopy={copyCited}
               />
-            </div>
+            )}
           </div>
 
+          {/* The ONLY scroll region in the drawer. FulltextSection internally
+            * has shrink-0 "源全文" header + flex-1 overflow-y-auto pre, so
+            * the user scrolls long fulltexts inside this box; the drawer's
+            * own header / title block / source-mode footer all stay pinned. */}
+          <FulltextSection
+            mode={active.mode}
+            loading={loading}
+            error={error}
+            hasFulltext={!!fulltext}
+            charCount={fulltext?.char_count}
+            slices={slices}
+            markRef={markRef}
+            onRetry={loadFulltext}
+            citedText={citation?.text}
+          />
+
           {isSource && (
-            <div className="border-t border-border bg-muted/40 px-4 py-2 text-[11px] leading-relaxed text-muted-foreground">
+            <div className="shrink-0 border-t border-border bg-muted/40 px-4 py-2 text-[11px] leading-relaxed text-muted-foreground">
               <div className="flex items-start gap-1.5">
                 <Info className="mt-0.5 size-3.5 shrink-0" />
                 <span className="min-w-0 break-words">
@@ -282,7 +270,7 @@ function DrawerHeader({
   highlightLevel?: Level | null;
 }) {
   return (
-    <div className="flex min-w-0 items-center gap-1 border-b border-border px-3 py-2">
+    <div className="flex min-w-0 shrink-0 items-center gap-1 border-b border-border px-3 py-2">
       {mode === "citation" ? (
         <>
           <Button
@@ -443,9 +431,15 @@ function FulltextSection({
   onRetry: () => void;
   citedText: string | undefined;
 }) {
+  /* Three-row mini-layout so only the middle row (the fulltext itself)
+   * scrolls — the "源全文 + N 字符" header and the optional miss-warning
+   * footer stay pinned. The parent (DialogPrimitive.Content) gives us
+   * flex-1 from its flex-col, so we just need min-h-0 + flex flex-col here.
+   */
   return (
-    <div className="min-w-0">
-      <div className="mb-2 flex items-center gap-2">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      {/* Row 1: shrink-0 — "源全文" header bar */}
+      <div className="flex shrink-0 items-center gap-2 px-4 pb-2 pt-3">
         <h3 className="text-sm font-semibold">源全文</h3>
         {hasFulltext && charCount != null && (
           <span className="text-[11px] text-muted-foreground">
@@ -454,27 +448,28 @@ function FulltextSection({
         )}
       </div>
 
-      {loading && (
-        <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
-          <Loader2 className="size-4 animate-spin" />
-          正在拉取源全文…
-        </div>
-      )}
-
-      {error && !loading && (
-        <div className="flex flex-col items-start gap-3 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-          <div className="flex gap-2">
-            <AlertCircle className="mt-0.5 size-4 shrink-0" />
-            <span className="break-words">{error}</span>
+      {/* Row 2: flex-1, only this scrolls */}
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 pb-4">
+        {loading && (
+          <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+            <Loader2 className="size-4 animate-spin" />
+            正在拉取源全文…
           </div>
-          <Button variant="outline" size="sm" onClick={onRetry}>
-            重试
-          </Button>
-        </div>
-      )}
+        )}
 
-      {hasFulltext && !loading && !error && (
-        <>
+        {error && !loading && (
+          <div className="flex flex-col items-start gap-3 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+            <div className="flex gap-2">
+              <AlertCircle className="mt-0.5 size-4 shrink-0" />
+              <span className="break-words">{error}</span>
+            </div>
+            <Button variant="outline" size="sm" onClick={onRetry}>
+              重试
+            </Button>
+          </div>
+        )}
+
+        {hasFulltext && !loading && !error && (
           <pre className="whitespace-pre-wrap break-words rounded-md border border-border bg-background/60 p-3 font-sans text-sm leading-relaxed text-foreground">
             {slices.found ? (
               <>
@@ -491,12 +486,16 @@ function FulltextSection({
               slices.pre
             )}
           </pre>
-          {mode === "citation" && !slices.found && citedText && (
-            <p className="mt-2 text-[11px] text-muted-foreground">
-              未在源全文中找到对应段落 — NotebookLM 在索引时可能截取或重新格式化了该引文,无法直接定位高亮位置。
-            </p>
-          )}
-        </>
+        )}
+      </div>
+
+      {/* Row 3: shrink-0 — miss warning, pinned to the bottom of the scroll
+       *  region so it stays visible without the user having to scroll. */}
+      {hasFulltext && !loading && !error && mode === "citation" &&
+        !slices.found && citedText && (
+        <p className="shrink-0 border-t border-border bg-muted/40 px-4 py-2 text-[11px] text-muted-foreground">
+          未在源全文中找到对应段落 — NotebookLM 在索引时可能截取或重新格式化了该引文,无法直接定位高亮位置。
+        </p>
       )}
     </div>
   );
