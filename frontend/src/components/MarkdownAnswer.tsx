@@ -22,10 +22,17 @@ const CITE_TOKEN_REGEX = /⟦cite:(\d+)⟧/g;
 const CITE_SPLIT_REGEX = /(⟦cite:\d+⟧)/g;
 
 function preprocess(text: string): string {
-  // [1]  →  ⟦cite:1⟧
-  // We require the bracketed integer to be standalone (not preceded by `]` or
-  // similar) so we don't mangle markdown link references like `[1]: https://…`.
-  return text.replace(/\[(\d+)\]/g, `${CITE_TOKEN_LEFT}$1${CITE_TOKEN_RIGHT}`);
+  // [1] → ⟦cite:1⟧, [2,3] → ⟦cite:2⟧⟦cite:3⟧, [1, 2, 3] → three chips.
+  // Strict digit-only inside the brackets so markdown link refs `[1]: https://…`
+  // and bracketed text like `[some, text]` / `[2024-01]` aren't mangled.
+  return text.replace(
+    /\[(\d+(?:\s*,\s*\d+)*)\]/g,
+    (_m, group: string) =>
+      group
+        .split(/\s*,\s*/)
+        .map((n) => `${CITE_TOKEN_LEFT}${n}${CITE_TOKEN_RIGHT}`)
+        .join(""),
+  );
 }
 
 /** Walk children, splitting any string node on the citation sentinel and

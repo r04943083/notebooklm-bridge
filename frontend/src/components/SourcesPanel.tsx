@@ -12,6 +12,7 @@ import type { ComponentType } from "react";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { useCitationViewer } from "@/lib/chat-context";
 import { cn } from "@/lib/utils";
 import type { Source } from "@/types";
 
@@ -117,15 +118,19 @@ export function SourcesPanel({
 }
 
 /**
- * One row in the sources list. Renders as an `<a>` opening in a new tab when
- * `source.url` is set (web/YouTube), otherwise as a plain (non-interactive)
- * `<div>` — PDFs / Drive files have no upstream-supplied viewer URL so there's
- * nothing to navigate to from here.
+ * One row in the sources list.
+ *   - web / YouTube (has `source.url`) → `<a>` opening in a new tab
+ *   - everything else (PDF / Drive / text) → `<button>` opening the
+ *     CitationDrawer in source-mode, which shows the source's fulltext.
+ *     Upstream `notebooklm-py 0.4.1` doesn't return the original binary or
+ *     embedded images, so the Drawer shows OCR'd / extracted text only and
+ *     includes a note pointing the user to the NotebookLM web app for figures.
  */
 function SourceRow({ source: src }: { source: Source }) {
   const Icon = (src.kind && KIND_ICON[src.kind.toLowerCase()]) || File;
   const relTime = formatRelativeTime(src.created_at);
   const isLink = !!src.url;
+  const { openSource } = useCitationViewer();
 
   const inner = (
     <>
@@ -170,7 +175,7 @@ function SourceRow({ source: src }: { source: Source }) {
   );
 
   const baseCls =
-    "group flex items-start gap-2.5 rounded-md p-2 transition-colors";
+    "group flex w-full items-start gap-2.5 rounded-md p-2 text-left transition-colors hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
   if (isLink) {
     return (
@@ -178,7 +183,7 @@ function SourceRow({ source: src }: { source: Source }) {
         href={src.url ?? undefined}
         target="_blank"
         rel="noopener noreferrer"
-        className={cn(baseCls, "hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring")}
+        className={cn(baseCls)}
         title={`在新标签页打开:${src.url}`}
       >
         {inner}
@@ -186,5 +191,14 @@ function SourceRow({ source: src }: { source: Source }) {
     );
   }
 
-  return <div className={cn(baseCls, "hover:bg-muted")}>{inner}</div>;
+  return (
+    <button
+      type="button"
+      onClick={() => openSource(src.id)}
+      className={cn(baseCls, "cursor-pointer")}
+      title={`查看《${src.title || src.id}》的全文`}
+    >
+      {inner}
+    </button>
+  );
 }

@@ -1,10 +1,8 @@
 import { AlertCircle, MessageSquareText, Sparkles } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api } from "@/api";
-import { CitationDrawer } from "@/components/CitationDrawer";
 import { ChatComposer } from "@/components/ChatComposer";
 import { ChatTurn } from "@/components/ChatTurn";
-import { CitationViewerProvider } from "@/lib/chat-context";
 import type { ChatRequest, ChatResponse, ChatTurn as ChatTurnType } from "@/types";
 
 const EMPTY_TURNS: ChatTurnType[] = [];
@@ -17,11 +15,38 @@ const EMPTY_TURNS: ChatTurnType[] = [];
  * must bubble immediately so the user sees the actual message.
  */
 const RETRY_DELAYS_MS = [500, 1500] as const;
-async function askWithRetry(req: ChatRequest): Promise<ChatResponse> {
+
+/** setTimeout wrapped to reject early when an AbortSignal fires, so a user
+ *  pressing the stop button during the inter-retry sleep doesn't wait
+ *  500-1500ms before the cancellation takes effect. */
+function sleepAbortable(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new DOMException("aborted", "AbortError"));
+      return;
+    }
+    const t = window.setTimeout(resolve, ms);
+    signal.addEventListener(
+      "abort",
+      () => {
+        window.clearTimeout(t);
+        reject(new DOMException("aborted", "AbortError"));
+      },
+      { once: true }
+    );
+  });
+}
+
+async function askWithRetry(
+  req: ChatRequest,
+  signal: AbortSignal
+): Promise<ChatResponse> {
   for (let attempt = 0; ; attempt++) {
     try {
-      return await api.ask(req);
+      return await api.ask(req, { signal });
     } catch (e) {
+      // User-driven abort — propagate immediately, never retry.
+      if ((e as Error)?.name === "AbortError") throw e;
       const retryable =
         e instanceof ApiError &&
         e.status === 504 &&
@@ -31,7 +56,7 @@ async function askWithRetry(req: ChatRequest): Promise<ChatResponse> {
       console.warn(
         `chat.ask 504 — retrying in ${RETRY_DELAYS_MS[attempt]}ms (attempt ${attempt + 1}/${RETRY_DELAYS_MS.length})`
       );
-      await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]));
+      await sleepAbortable(RETRY_DELAYS_MS[attempt], signal);
     }
   }
 }
@@ -69,7 +94,13 @@ export function ChatPane({
   const [turns, setTurns] = useState<ChatTurnType[]>(initialTurns);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** The question that was just sent. On user-driven abort we hand this back
+   *  to ChatComposer so the user can tweak and re-send without retyping. */
+  const [lastQuestion, setLastQuestion] = useState<string>("");
   const scrollerRef = useRef<HTMLDivElement>(null);
+  /** Lives in a ref (not state) because the abort handler doesn't need a
+   *  re-render — only loading/lastQuestion changes do. */
+  const abortRef = useRef<AbortController | null>(null);
 
   // Pin scroll to bottom after each new turn.
   useEffect(() => {
@@ -80,65 +111,94 @@ export function ChatPane({
     });
   }, [turns.length, loading]);
 
+  // Abort in-flight request if the pane is unmounted (e.g. notebook switch).
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
+
   const submit = async (question: string) => {
     setLoading(true);
     setError(null);
+    setLastQuestion(question);
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     try {
-      const resp = await askWithRetry({ notebook_id: notebookId, question });
+      const resp = await askWithRetry(
+        { notebook_id: notebookId, question },
+        ctrl.signal
+      );
       const turn: ChatTurnType = { question, response: resp };
       setTurns((prev) => [...prev, turn]);
       onTurn(turn);
+      // Successful round-trip — clear the "pending re-send" buffer so the
+      // composer doesn't repopulate after the next normal submit completes.
+      setLastQuestion("");
     } catch (e) {
+      if ((e as Error)?.name === "AbortError") {
+        // User-driven abort — keep `lastQuestion` so the composer can restore
+        // it; don't surface as an error.
+        return;
+      }
       setError((e as Error).message);
     } finally {
       setLoading(false);
+      abortRef.current = null;
     }
   };
 
+  const handleAbort = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
+
+  const clearLastQuestion = useCallback(() => {
+    setLastQuestion("");
+  }, []);
+
   return (
-    <CitationViewerProvider>
-      <div className="flex h-full min-h-0 flex-col">
+    <div className="flex h-full min-h-0 flex-col">
+      <div
+        ref={scrollerRef}
+        className="min-h-0 flex-1 overflow-y-auto"
+      >
         <div
-          ref={scrollerRef}
-          className="min-h-0 flex-1 overflow-y-auto"
+          role="log"
+          aria-live="polite"
+          aria-atomic="false"
+          aria-label="对话历史"
+          className="mx-auto flex max-w-5xl flex-col gap-4 px-4 py-6"
         >
-          <div
-            role="log"
-            aria-live="polite"
-            aria-atomic="false"
-            aria-label="对话历史"
-            className="mx-auto flex max-w-3xl flex-col gap-4 px-4 py-6"
-          >
-            {turns.length === 0 && !loading && (
-              <EmptyState notebookTitle={notebookTitle} />
-            )}
+          {turns.length === 0 && !loading && (
+            <EmptyState notebookTitle={notebookTitle} />
+          )}
 
-            {turns.map((t, i) => (
-              <ChatTurn key={i} turn={t} />
-            ))}
+          {turns.map((t, i) => (
+            <ChatTurn key={i} turn={t} />
+          ))}
 
-            {loading && <ThinkingIndicator />}
+          {loading && <ThinkingIndicator />}
 
-            {error && (
-              <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-                <AlertCircle className="mt-0.5 size-4 shrink-0" />
-                <span className="break-words">{error}</span>
-              </div>
-            )}
-          </div>
+          {error && (
+            <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+              <AlertCircle className="mt-0.5 size-4 shrink-0" />
+              <span className="break-words">{error}</span>
+            </div>
+          )}
         </div>
-
-        <ChatComposer
-          onSubmit={submit}
-          onNewConversation={onNewConversation}
-          loading={loading}
-          disabled={!notebookId}
-          hasTurns={turns.length > 0}
-        />
-
-        <CitationDrawer />
       </div>
-    </CitationViewerProvider>
+
+      <ChatComposer
+        onSubmit={submit}
+        onNewConversation={onNewConversation}
+        onAbort={handleAbort}
+        loading={loading}
+        disabled={!notebookId}
+        hasTurns={turns.length > 0}
+        restoreDraft={lastQuestion}
+        onDraftRestored={clearLastQuestion}
+      />
+    </div>
   );
 }
 
@@ -159,11 +219,19 @@ function EmptyState({ notebookTitle }: { notebookTitle?: string }) {
 }
 
 function ThinkingIndicator() {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const start = Date.now();
+    const id = window.setInterval(() => {
+      setElapsed(Math.floor((Date.now() - start) / 1000));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, []);
   return (
     <div className="flex items-center gap-2 text-sm text-muted-foreground">
       <MessageSquareText className="size-4" />
       <span className="inline-flex items-center gap-1">
-        正在思考
+        正在思考 {elapsed}s
         <span className="inline-flex">
           <span className="h-1 w-1 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.3s]" />
           <span className="mx-0.5 h-1 w-1 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.15s]" />

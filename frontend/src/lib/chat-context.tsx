@@ -10,9 +10,9 @@ import type { Citation, Source } from "@/types";
 
 // ---------------------------------------------------------------------------
 // SourcesContext — read-only access to the current notebook's source list (and
-// its id) so CitationModal / FulltextViewer / SourcesPanel can join by
-// source_id and fetch fulltext without prop drilling through ChatPane /
-// ChatTurn / MarkdownAnswer / CitationChip.
+// its id) so CitationDrawer / SourcesPanel can join by source_id and fetch
+// fulltext without prop drilling through ChatPane / ChatTurn / MarkdownAnswer
+// / CitationChip.
 // ---------------------------------------------------------------------------
 
 interface SourcesContextValue {
@@ -60,15 +60,39 @@ export function useSourceLookup(): (source_id: string) => Source | undefined {
 }
 
 // ---------------------------------------------------------------------------
-// CitationViewerContext — one active citation Drawer shared across all chips
-// in the ChatPane. The provider holds `(citations, index)` so the Drawer can
-// render the cited text, fetch fulltext, and let the user step between
-// citations from the same answer turn with prev() / next().
+// UserContext — lightweight access to the current X-User-Id. Lets ChatTurn
+// render a UserAvatar without prop-drilling userId through ChatPane.
 // ---------------------------------------------------------------------------
 
+const UserContext = createContext<string>("");
+
+export function UserProvider({ userId, children }: { userId: string; children: ReactNode }) {
+  return <UserContext.Provider value={userId}>{children}</UserContext.Provider>;
+}
+
+export function useUser(): string {
+  return useContext(UserContext);
+}
+
+// ---------------------------------------------------------------------------
+// CitationViewerContext — one active Drawer shared across all chips and the
+// SourcesPanel. The Drawer has two modes:
+//   - "citation": opened from a chip; carries the full citations[] for a turn
+//     so the user can step between [1], [2], [3] of the same answer with
+//     prev() / next().
+//   - "source":   opened from a PDF / Drive row in SourcesPanel; carries only
+//     a source_id so the Drawer can render its title + fulltext (no cited
+//     snippet, no prev/next).
+// ---------------------------------------------------------------------------
+
+export type DrawerState =
+  | { mode: "citation"; citations: Citation[]; index: number }
+  | { mode: "source"; sourceId: string };
+
 interface CitationViewerValue {
-  active: { citations: Citation[]; index: number } | null;
-  open: (citations: Citation[], index: number) => void;
+  active: DrawerState | null;
+  openCitation: (citations: Citation[], index: number) => void;
+  openSource: (sourceId: string) => void;
   close: () => void;
   prev: () => void;
   next: () => void;
@@ -77,26 +101,30 @@ interface CitationViewerValue {
 const CitationViewerContext = createContext<CitationViewerValue | null>(null);
 
 export function CitationViewerProvider({ children }: { children: ReactNode }) {
-  const [active, setActive] = useState<{
-    citations: Citation[];
-    index: number;
-  } | null>(null);
+  const [active, setActive] = useState<DrawerState | null>(null);
 
   const value = useMemo<CitationViewerValue>(
     () => ({
       active,
-      open: (citations, index) =>
-        setActive({ citations, index: clampIndex(index, citations.length) }),
+      openCitation: (citations, index) =>
+        setActive({
+          mode: "citation",
+          citations,
+          index: clampIndex(index, citations.length),
+        }),
+      openSource: (sourceId) => setActive({ mode: "source", sourceId }),
       close: () => setActive(null),
+      // prev / next are no-ops in source mode — there is no "next source" to
+      // step to (the user can click another row in SourcesPanel).
       prev: () =>
         setActive((cur) =>
-          cur === null
+          cur === null || cur.mode !== "citation"
             ? cur
             : { ...cur, index: clampIndex(cur.index - 1, cur.citations.length) }
         ),
       next: () =>
         setActive((cur) =>
-          cur === null
+          cur === null || cur.mode !== "citation"
             ? cur
             : { ...cur, index: clampIndex(cur.index + 1, cur.citations.length) }
         ),

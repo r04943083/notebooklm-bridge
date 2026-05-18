@@ -1,5 +1,6 @@
-import { BookOpen, Check, ChevronDown, History, User } from "lucide-react";
+import { BookOpen, Check, ChevronDown, History } from "lucide-react";
 import { BridgeLogo } from "@/components/BridgeLogo";
+import { UserAvatar } from "@/components/UserAvatar";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
 import {
@@ -171,8 +172,8 @@ export function TopBar({
         <ThemeToggle />
 
         {/* User chip */}
-        <div className="ml-1 flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 text-xs">
-          <User className="size-3.5 text-muted-foreground" />
+        <div className="ml-1 flex items-center gap-2 rounded-full border border-border bg-card pl-1 pr-3 py-1 text-xs">
+          <UserAvatar id={userId} size="md" />
           <span className="font-medium" title={`X-User-Id: ${userId}`}>
             {userId}
           </span>

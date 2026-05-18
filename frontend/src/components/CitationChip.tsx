@@ -26,7 +26,7 @@ interface CitationChipProps {
  * mid-stream upstream weirdness.
  */
 export function CitationChip({ n, citations, className }: CitationChipProps) {
-  const { open } = useCitationViewer();
+  const { openCitation } = useCitationViewer();
   const lookup = useSourceLookup();
 
   const citation: Citation | undefined = citations[n - 1];
@@ -49,7 +49,7 @@ export function CitationChip({ n, citations, className }: CitationChipProps) {
       <TooltipTrigger asChild>
         <button
           type="button"
-          onClick={() => open(citations, n - 1)}
+          onClick={() => openCitation(citations, n - 1)}
           aria-label={`查看引用 ${n}:${tooltipLabel}`}
           className={cn(
             "mx-0.5 inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded px-1 text-[11px] font-medium transition-colors",

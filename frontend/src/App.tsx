@@ -10,7 +10,12 @@ import { TopBar } from "@/components/TopBar";
 import { UserPrompt } from "@/components/UserPrompt";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { SourcesProvider } from "@/lib/chat-context";
+import {
+  CitationViewerProvider,
+  SourcesProvider,
+  UserProvider,
+} from "@/lib/chat-context";
+import { CitationDrawer } from "@/components/CitationDrawer";
 import type { ChatTurn, HistoryEntry, Notebook, Source } from "@/types";
 
 const HISTORY_KEY = "nblm_history";
@@ -220,7 +225,9 @@ export default function App() {
   return (
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
       <TooltipProvider delayDuration={200}>
-        <SourcesProvider notebookId={notebookId || null} sources={sources}>
+        <UserProvider userId={userId}>
+          <SourcesProvider notebookId={notebookId || null} sources={sources}>
+            <CitationViewerProvider>
           <AppShell
             topBar={
               <TopBar
@@ -283,7 +290,10 @@ export default function App() {
               </div>
             )}
           </AppShell>
-        </SourcesProvider>
+              <CitationDrawer />
+            </CitationViewerProvider>
+          </SourcesProvider>
+        </UserProvider>
       </TooltipProvider>
     </ThemeProvider>
   );

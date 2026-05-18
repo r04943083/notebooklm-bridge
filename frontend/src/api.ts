@@ -65,6 +65,10 @@ async function request<T>(path: string, opt?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+interface AskOptions {
+  signal?: AbortSignal;
+}
+
 export const api = {
   listNotebooks: () => request<Notebook[]>("/notebooks"),
 
@@ -78,10 +82,11 @@ export const api = {
       `/sources/${encodeURIComponent(source_id)}/fulltext?notebook_id=${encodeURIComponent(notebook_id)}`
     ),
 
-  ask: (req: ChatRequest) =>
+  ask: (req: ChatRequest, opts?: AskOptions) =>
     request<ChatResponse>("/chat", {
       method: "POST",
       body: JSON.stringify(req),
+      signal: opts?.signal,
     }),
 
   resetChat: async (notebook_id: string): Promise<void> => {
