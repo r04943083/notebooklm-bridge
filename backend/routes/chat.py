@@ -184,3 +184,27 @@ async def reset_chat(
 ) -> Response:
     request.app.state.store.reset_session(user_id, notebook_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/chat/select", status_code=status.HTTP_204_NO_CONTENT)
+async def select_conversation(
+    notebook_id: str,
+    conversation_id: str,
+    request: Request,
+    user_id: Annotated[str, Depends(require_internal_user)],
+) -> Response:
+    """Point the backend session for (user, notebook) at a different
+    conversation_id, used when the user clicks a history entry. The next
+    /api/chat call will resume that conversation upstream instead of the one
+    that was last active.
+
+    No upstream RPC happens here — this is a setter on the in-memory ``Store``
+    that is also debounce-persisted to ``state.json``. Auth is still required
+    so an unauthenticated caller can't hijack another user's session.
+    """
+    if not conversation_id:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, detail="conversation_id 必填"
+        )
+    request.app.state.store.set_session(user_id, notebook_id, conversation_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

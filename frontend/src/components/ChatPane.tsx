@@ -1,11 +1,13 @@
 import { AlertCircle, MessageSquareText, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { ApiError, api } from "@/api";
-import { CitationModal } from "@/components/CitationModal";
+import { CitationDrawer } from "@/components/CitationDrawer";
 import { ChatComposer } from "@/components/ChatComposer";
 import { ChatTurn } from "@/components/ChatTurn";
 import { CitationViewerProvider } from "@/lib/chat-context";
 import type { ChatRequest, ChatResponse, ChatTurn as ChatTurnType } from "@/types";
+
+const EMPTY_TURNS: ChatTurnType[] = [];
 
 /**
  * api.ask with bounded exponential backoff on 504 (gateway timeout). 504 is
@@ -37,36 +39,37 @@ async function askWithRetry(req: ChatRequest): Promise<ChatResponse> {
 interface ChatPaneProps {
   notebookId: string;
   notebookTitle?: string;
+  /** Turns to display when the pane mounts — used by App.tsx to rehydrate a
+   *  conversation picked from the history popover. ChatPane remounts (via a
+   *  `key` change in App.tsx) whenever the active conversation switches, so we
+   *  only seed `turns` here in the initialiser, not in a follow-up effect. */
+  initialTurns?: ChatTurnType[];
   onTurn: (turn: ChatTurnType) => void;
+  /** Click of "new conversation". App.tsx owns the backend /chat/reset call
+   *  and the activeConversationId reset so this pane is purely a view layer. */
+  onNewConversation: () => void;
 }
 
 /**
- * Central conversation pane. Holds local turn state, calls /api/chat / reset,
- * scrolls to the newest message after each turn, and renders the per-chat
- * CitationModal under its own provider so chip clicks anywhere in the turn
- * stream open the same modal.
+ * Central conversation pane. Renders turns, drives /api/chat through
+ * askWithRetry, and hosts the CitationDrawer.
  *
- * State only lives in memory — closing the tab loses turns; rebuilding from
- * the backend store would require an /api/chat/history endpoint that we don't
- * have yet. The TopBar history popover bridges the gap by letting users see
- * past conversation IDs.
+ * Conversation lifecycle is owned by App.tsx: switching notebooks or restoring
+ * a history entry causes a key change on this component, which remounts it
+ * with the new `initialTurns`. That keeps the resume / reset logic in one place
+ * and avoids the "effect resets the turn that just arrived" footgun.
  */
-export function ChatPane({ notebookId, notebookTitle, onTurn }: ChatPaneProps) {
-  const [turns, setTurns] = useState<ChatTurnType[]>([]);
+export function ChatPane({
+  notebookId,
+  notebookTitle,
+  initialTurns = EMPTY_TURNS,
+  onTurn,
+  onNewConversation,
+}: ChatPaneProps) {
+  const [turns, setTurns] = useState<ChatTurnType[]>(initialTurns);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
-  const lastNotebook = useRef(notebookId);
-
-  // Switching notebooks resets the local conversation — backend Store still
-  // keeps the (user, notebook) → conversation_id pair so the next ask resumes.
-  useEffect(() => {
-    if (lastNotebook.current !== notebookId) {
-      setTurns([]);
-      setError(null);
-      lastNotebook.current = notebookId;
-    }
-  }, [notebookId]);
 
   // Pin scroll to bottom after each new turn.
   useEffect(() => {
@@ -89,17 +92,6 @@ export function ChatPane({ notebookId, notebookTitle, onTurn }: ChatPaneProps) {
       setError((e as Error).message);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const newConversation = async () => {
-    if (!notebookId) return;
-    setError(null);
-    try {
-      await api.resetChat(notebookId);
-      setTurns([]);
-    } catch (e) {
-      setError((e as Error).message);
     }
   };
 
@@ -138,13 +130,13 @@ export function ChatPane({ notebookId, notebookTitle, onTurn }: ChatPaneProps) {
 
         <ChatComposer
           onSubmit={submit}
-          onNewConversation={newConversation}
+          onNewConversation={onNewConversation}
           loading={loading}
           disabled={!notebookId}
           hasTurns={turns.length > 0}
         />
 
-        <CitationModal />
+        <CitationDrawer />
       </div>
     </CitationViewerProvider>
   );

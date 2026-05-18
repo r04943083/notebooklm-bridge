@@ -118,9 +118,12 @@ export function ChatComposer({
           </Button>
         </div>
       </div>
-      <p className="mx-auto mt-2 max-w-3xl text-center text-[11px] text-muted-foreground">
-        问答内容会发送到 NotebookLM(Google)服务器,请勿粘贴敏感数据。
-      </p>
+      <div className="mx-auto mt-2 max-w-3xl text-center text-[11px] text-muted-foreground">
+        <p>问答内容会发送到 NotebookLM(Google)服务器,请勿粘贴敏感数据。</p>
+        <p className="mt-0.5 opacity-70">
+          notebooklm-bridge v{__APP_VERSION__} · built by luyh
+        </p>
+      </div>
     </div>
   );
 }

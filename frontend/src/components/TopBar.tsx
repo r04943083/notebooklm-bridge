@@ -1,4 +1,5 @@
-import { BookOpen, Check, ChevronDown, History, Sparkles, User } from "lucide-react";
+import { BookOpen, Check, ChevronDown, History, User } from "lucide-react";
+import { BridgeLogo } from "@/components/BridgeLogo";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
 import {
@@ -47,7 +48,7 @@ export function TopBar({
   return (
     <header className="col-span-3 flex h-14 items-center gap-3 border-b border-border bg-background px-4">
       <div className="flex items-center gap-2 text-sm font-semibold">
-        <Sparkles className="size-5 text-accent" />
+        <BridgeLogo className="size-6" />
         <span>NotebookLM Bridge</span>
       </div>
 

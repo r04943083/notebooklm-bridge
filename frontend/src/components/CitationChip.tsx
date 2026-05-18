@@ -8,24 +8,28 @@ import { useCitationViewer, useSourceLookup } from "@/lib/chat-context";
 import type { Citation } from "@/types";
 
 interface CitationChipProps {
+  /** 1-based citation number as it appears in the answer text (e.g. `[1]`). */
   n: number;
-  citation: Citation | undefined;
+  /** All citations for this answer turn — used to enable prev/next in the
+   *  Drawer. The chip displays `citations[n - 1]`. */
+  citations: Citation[];
   className?: string;
 }
 
 /**
  * Inline [n] citation marker rendered inside the answer text. Clicking it opens
- * the CitationModal with the corresponding excerpt. Tooltip on hover previews
- * the source title (joined from SourcesContext when available).
+ * the CitationDrawer with the corresponding excerpt and the full citation list
+ * positioned at index n-1, so the user can step prev/next without closing.
  *
  * Falls back to a dimmed unclickable chip if the answer references a citation
  * number that the upstream didn't include in `references` — defensive against
  * mid-stream upstream weirdness.
  */
-export function CitationChip({ n, citation, className }: CitationChipProps) {
+export function CitationChip({ n, citations, className }: CitationChipProps) {
   const { open } = useCitationViewer();
   const lookup = useSourceLookup();
 
+  const citation: Citation | undefined = citations[n - 1];
   const sourceTitle = citation ? lookup(citation.source_id)?.title : undefined;
   const tooltipLabel = sourceTitle || citation?.source_id || `引用 ${n}`;
 
@@ -45,7 +49,7 @@ export function CitationChip({ n, citation, className }: CitationChipProps) {
       <TooltipTrigger asChild>
         <button
           type="button"
-          onClick={() => open(citation)}
+          onClick={() => open(citations, n - 1)}
           aria-label={`查看引用 ${n}:${tooltipLabel}`}
           className={cn(
             "mx-0.5 inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded px-1 text-[11px] font-medium transition-colors",

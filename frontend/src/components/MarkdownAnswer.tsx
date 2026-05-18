@@ -51,7 +51,7 @@ function injectChips(
     const m = part.match(/^⟦cite:(\d+)⟧$/);
     if (!m) return <React.Fragment key={i}>{part}</React.Fragment>;
     const n = parseInt(m[1], 10);
-    return <CitationChip key={i} n={n} citation={citations[n - 1]} />;
+    return <CitationChip key={i} n={n} citations={citations} />;
   });
 }
 

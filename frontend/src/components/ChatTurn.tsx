@@ -54,7 +54,10 @@ export function ChatTurn({ turn }: ChatTurnProps) {
                     const src = lookup(c.source_id);
                     return (
                       <li key={i} className="flex gap-2">
-                        <CitationChip n={i + 1} citation={c} />
+                        <CitationChip
+                          n={i + 1}
+                          citations={response.citations}
+                        />
                         <span className="min-w-0 flex-1">
                           <span
                             className="block truncate font-medium text-foreground"

@@ -90,7 +90,20 @@ export const api = {
       { method: "POST", headers: authHeaders() }
     );
     if (!res.ok && res.status !== 204) {
-      throw new Error(`API ${res.status}: ${await res.text()}`);
+      throw new ApiError(res.status, `API ${res.status}: ${await res.text()}`);
+    }
+  },
+
+  selectConversation: async (
+    notebook_id: string,
+    conversation_id: string
+  ): Promise<void> => {
+    const res = await fetch(
+      `${API_BASE}/chat/select?notebook_id=${encodeURIComponent(notebook_id)}&conversation_id=${encodeURIComponent(conversation_id)}`,
+      { method: "POST", headers: authHeaders() }
+    );
+    if (!res.ok && res.status !== 204) {
+      throw new ApiError(res.status, `API ${res.status}: ${await res.text()}`);
     }
   },
 

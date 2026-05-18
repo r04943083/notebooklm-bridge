@@ -60,27 +60,46 @@ export function useSourceLookup(): (source_id: string) => Source | undefined {
 }
 
 // ---------------------------------------------------------------------------
-// CitationViewerContext — one active citation modal shared across all chips in
-// the ChatPane. The provider holds `active` state; chips call `open(citation)`,
-// CitationModal reads `active` to know what to show.
+// CitationViewerContext — one active citation Drawer shared across all chips
+// in the ChatPane. The provider holds `(citations, index)` so the Drawer can
+// render the cited text, fetch fulltext, and let the user step between
+// citations from the same answer turn with prev() / next().
 // ---------------------------------------------------------------------------
 
 interface CitationViewerValue {
-  active: Citation | null;
-  open: (c: Citation) => void;
+  active: { citations: Citation[]; index: number } | null;
+  open: (citations: Citation[], index: number) => void;
   close: () => void;
+  prev: () => void;
+  next: () => void;
 }
 
 const CitationViewerContext = createContext<CitationViewerValue | null>(null);
 
 export function CitationViewerProvider({ children }: { children: ReactNode }) {
-  const [active, setActive] = useState<Citation | null>(null);
+  const [active, setActive] = useState<{
+    citations: Citation[];
+    index: number;
+  } | null>(null);
 
   const value = useMemo<CitationViewerValue>(
     () => ({
       active,
-      open: (c) => setActive(c),
+      open: (citations, index) =>
+        setActive({ citations, index: clampIndex(index, citations.length) }),
       close: () => setActive(null),
+      prev: () =>
+        setActive((cur) =>
+          cur === null
+            ? cur
+            : { ...cur, index: clampIndex(cur.index - 1, cur.citations.length) }
+        ),
+      next: () =>
+        setActive((cur) =>
+          cur === null
+            ? cur
+            : { ...cur, index: clampIndex(cur.index + 1, cur.citations.length) }
+        ),
     }),
     [active]
   );
@@ -90,6 +109,13 @@ export function CitationViewerProvider({ children }: { children: ReactNode }) {
       {children}
     </CitationViewerContext.Provider>
   );
+}
+
+function clampIndex(idx: number, len: number): number {
+  if (len <= 0) return 0;
+  if (idx < 0) return 0;
+  if (idx >= len) return len - 1;
+  return idx;
 }
 
 export function useCitationViewer(): CitationViewerValue {
