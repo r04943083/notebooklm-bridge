@@ -19,6 +19,15 @@ const pkgVersion: string = JSON.parse(
 // Port pinning is a HARD requirement, see CLAUDE.md §3.2. strictPort: true makes
 // the dev server fail loudly instead of silently bumping to 5176, which would
 // break the documented proxy / CORS / readme URLs.
+
+// WSL2 quirk: when the working tree lives under `/mnt/<drive>/...`, the 9P
+// Windows↔Linux file bridge unreliably emits inotify events, so chokidar
+// (Vite's default watcher) misses file edits — HMR silently drops, and a
+// hard browser refresh just re-serves the cached bundle. Switching to
+// polling on these mounts is the well-known fix; CPU cost is negligible at
+// a 300ms interval. Native Linux paths skip this so we don't waste cycles.
+const onWslMount = process.cwd().startsWith("/mnt/");
+
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
@@ -36,5 +45,8 @@ export default defineConfig({
     proxy: {
       "/api": "http://localhost:8002",
     },
+    watch: onWslMount
+      ? { usePolling: true, interval: 300 }
+      : undefined,
   },
 });
