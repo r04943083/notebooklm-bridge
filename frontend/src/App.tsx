@@ -107,12 +107,27 @@ export default function App() {
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [initialTurns, setInitialTurns] = useState<ChatTurn[]>([]);
 
-  // Clean up the `nblm_active_cid:<uid>` key left over from an older build
-  // that auto-restored the last conversation on reload. Harmless if absent;
-  // removed once on mount (and again if userId changes via "switch user").
+  // On first mount only: make sure a reload is truly a clean conversation.
+  // The frontend UI is already blank (initialTurns=[], activeConversationId=null),
+  // but the backend Store still maps (user_id, notebook_id) → previous cid,
+  // so without this the first /api/chat after reload would secretly resume
+  // the last conversation and append turns into the old turnsKey — i.e. the
+  // "all conversations end up smashed together under one cid" bug.
+  //
+  // Also tidy up the `nblm_active_cid:<uid>` dead key left by an older build.
   useEffect(() => {
     if (!userId) return;
     localStorage.removeItem(activeCidKey(userId));
+    const nb = localStorage.getItem(notebookKey(userId));
+    if (nb) {
+      api.resetChat(nb).catch((e) => {
+        // eslint-disable-next-line no-console
+        console.warn(
+          "initial resetChat failed (harmless, will retry on next ask):",
+          (e as Error).message
+        );
+      });
+    }
   }, [userId]);
 
   // Load notebooks list. Extracted into a callback so the retry button on the
@@ -243,6 +258,38 @@ export default function App() {
     [userId]
   );
 
+  /** Wipe every saved conversation under the given notebook for the current
+   *  user: removes the matching history entries, drops each conversation's
+   *  turnsKey, calls /chat/reset so the backend forgets its current cid, and
+   *  clears the live pane. The History popover hands this its `notebookId`
+   *  so other notebooks' history stays put. */
+  const handleClearNotebookHistory = useCallback(
+    async (nbId: string) => {
+      const victims = history.filter((h) => h.notebook_id === nbId);
+      for (const h of victims) {
+        try {
+          localStorage.removeItem(turnsKey(userId, h.conversation_id));
+        } catch {
+          // ignore — best-effort
+        }
+      }
+      const next = history.filter((h) => h.notebook_id !== nbId);
+      saveHistory(userId, next);
+      setHistory(next);
+      try {
+        await api.resetChat(nbId);
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn("resetChat during clear failed:", (e as Error).message);
+      }
+      if (nbId === notebookId) {
+        setActiveConversationId(null);
+        setInitialTurns([]);
+      }
+    },
+    [history, notebookId, userId]
+  );
+
   const handleNewConversation = useCallback(async () => {
     if (!notebookId) return;
     try {
@@ -287,6 +334,7 @@ export default function App() {
                     userId={userId}
                     history={history}
                     onSelectHistory={handleSelectHistory}
+                    onClearNotebookHistory={handleClearNotebookHistory}
                   />
                 }
                 sidebar={

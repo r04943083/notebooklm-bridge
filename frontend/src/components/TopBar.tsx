@@ -1,8 +1,17 @@
-import { BookOpen, Check, ChevronDown, History, LogOut } from "lucide-react";
+import { useState } from "react";
+import { BookOpen, Check, ChevronDown, History, LogOut, Trash2 } from "lucide-react";
 import { BridgeLogo } from "@/components/BridgeLogo";
 import { UserAvatar } from "@/components/UserAvatar";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -30,6 +39,10 @@ interface TopBarProps {
 
   history: HistoryEntry[];
   onSelectHistory: (entry: HistoryEntry) => void;
+  /** Wipe every conversation under the currently-selected notebook (called
+   *  from the "clear history" button in the History popover). App owns the
+   *  full wipe (history entries + turnsKey + backend reset + live pane). */
+  onClearNotebookHistory: (notebookId: string) => void | Promise<void>;
 }
 
 export function TopBar({
@@ -40,11 +53,14 @@ export function TopBar({
   userId,
   history,
   onSelectHistory,
+  onClearNotebookHistory,
 }: TopBarProps) {
   const selected = notebooks.find((n) => n.id === selectedNotebookId);
   const filteredHistory = selectedNotebookId
     ? history.filter((h) => h.notebook_id === selectedNotebookId)
     : history;
+  const [confirmClearOpen, setConfirmClearOpen] = useState(false);
+  const canClear = selectedNotebookId !== "" && filteredHistory.length > 0;
 
   return (
     <header className="col-span-3 flex h-14 items-center gap-3 border-b border-border bg-background px-4">
@@ -166,6 +182,18 @@ export function TopBar({
                 </ul>
               )}
             </ScrollArea>
+            {canClear && (
+              <div className="border-t border-border p-2">
+                <button
+                  type="button"
+                  onClick={() => setConfirmClearOpen(true)}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-sm px-2 py-1.5 text-xs text-destructive transition-colors hover:bg-destructive/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40"
+                >
+                  <Trash2 className="size-3.5" />
+                  清除本 notebook 的历史
+                </button>
+              </div>
+            )}
           </PopoverContent>
         </Popover>
 
@@ -208,6 +236,37 @@ export function TopBar({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      <Dialog open={confirmClearOpen} onOpenChange={setConfirmClearOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>清除本 notebook 历史</DialogTitle>
+            <DialogDescription>
+              即将清除「{selected?.title ?? "当前 notebook"}」下的{" "}
+              {filteredHistory.length} 条历史对话(含对话内容)。此操作不可撤销。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setConfirmClearOpen(false)}
+            >
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                setConfirmClearOpen(false);
+                if (selectedNotebookId) {
+                  void onClearNotebookHistory(selectedNotebookId);
+                }
+              }}
+            >
+              确认清除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </header>
   );
 }
