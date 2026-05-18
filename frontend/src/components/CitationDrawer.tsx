@@ -156,9 +156,20 @@ export function CitationDrawer() {
           onInteractOutside={(e) => {
             e.preventDefault();
           }}
+          /* Floating drawer. Sits *under* the TopBar (h-3.5rem) with 12px
+           * gaps on the top / right / bottom so it visually detaches from
+           * the chrome edges. Rounded + full border + shadow gives it the
+           * same "card pane" feel as ChatPane / SourcesPanel. overflow-hidden
+           * is needed for the rounded corners to actually clip the inner
+           * header / ScrollArea / footer borders.
+           *
+           * `w-[calc(100vw-1.5rem)]` is the responsive cap so the drawer
+           * doesn't push off-screen on narrow viewports (1.5rem = right-3
+           * + left margin). max-w-[520px] still holds on wide screens. */
           className={cn(
-            "fixed inset-y-0 right-0 z-40 flex w-full max-w-[520px] flex-col",
-            "border-l border-border bg-card shadow-2xl",
+            "fixed bottom-3 right-3 top-[calc(3.5rem+0.75rem)] z-40 flex flex-col",
+            "w-[calc(100vw-1.5rem)] max-w-[520px]",
+            "overflow-hidden rounded-xl border border-border bg-card shadow-2xl",
             "data-[state=open]:animate-in data-[state=closed]:animate-out",
             "data-[state=open]:slide-in-from-right data-[state=closed]:slide-out-to-right"
           )}
