@@ -117,9 +117,15 @@ export function CitationDrawer() {
   const title = source?.title || fulltext?.title || sourceId || "来源";
   // sliceContent is O(n) per fulltext (~150KB max); the few-ms cost per render
   // is well below the visual budget, so we don't bother memoising.
-  const slices = isCitation
+  const slices: Slices = isCitation
     ? sliceContent(fulltext?.content ?? "", citation?.text)
-    : { found: false as const, pre: fulltext?.content ?? "", mid: "", post: "" };
+    : {
+        found: false,
+        level: "miss",
+        pre: fulltext?.content ?? "",
+        mid: "",
+        post: "",
+      };
 
   const copyCited = async () => {
     try {
@@ -167,6 +173,12 @@ export function CitationDrawer() {
             onClose={close}
             onCopyAll={isSource ? copyFulltext : undefined}
             kind={source?.kind ?? fulltext?.kind ?? undefined}
+            /* Surface highlight level only when (a) in citation mode and
+             * (b) the fulltext has actually arrived — pre-load there's nothing
+             * to report yet. */
+            highlightLevel={
+              isCitation && !!fulltext && !!citation?.text ? slices.level : null
+            }
           />
 
           <ScrollArea className="min-h-0 flex-1">
@@ -239,6 +251,7 @@ function DrawerHeader({
   onClose,
   onCopyAll,
   kind,
+  highlightLevel,
 }: {
   mode: "citation" | "source";
   index: number;
@@ -248,6 +261,9 @@ function DrawerHeader({
   onClose: () => void;
   onCopyAll?: () => void;
   kind?: string;
+  /** Highlight match level for the current citation, or null when in source
+   *  mode / fulltext still loading. */
+  highlightLevel?: Level | null;
 }) {
   return (
     <div className="flex min-w-0 items-center gap-1 border-b border-border px-3 py-2">
@@ -285,6 +301,15 @@ function DrawerHeader({
       {kind && (
         <Badge variant="soft" className="ml-2 shrink-0">
           {kind}
+        </Badge>
+      )}
+      {highlightLevel && (
+        <Badge
+          variant={highlightLevel === "miss" ? "destructive" : "soft"}
+          className="ml-1 shrink-0"
+          title={LEVEL_TIPS[highlightLevel]}
+        >
+          {highlightLevel === "miss" ? "未命中" : `${highlightLevel} 命中`}
         </Badge>
       )}
       <div className="ml-auto flex items-center gap-1">
@@ -434,7 +459,7 @@ function FulltextSection({
 
       {hasFulltext && !loading && !error && (
         <>
-          <pre className="max-h-[60vh] overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-border bg-background/60 p-3 font-sans text-sm leading-relaxed text-foreground">
+          <pre className="whitespace-pre-wrap break-words rounded-md border border-border bg-background/60 p-3 font-sans text-sm leading-relaxed text-foreground">
             {slices.found ? (
               <>
                 {slices.pre}
@@ -472,8 +497,14 @@ function FulltextSection({
 // before giving up.
 // ---------------------------------------------------------------------------
 
+type Level = "L1" | "L2" | "L3" | "L4" | "miss";
+
 interface Slices {
   found: boolean;
+  /** Which fallback level produced the match. `miss` when nothing matched.
+   *  Surfaced in DrawerHeader as a badge so the user can tell when the
+   *  highlight position might be approximate (L2/L3/L4) vs exact (L1). */
+  level: Level;
   pre: string;
   mid: string;
   post: string;
@@ -481,45 +512,58 @@ interface Slices {
 
 function sliceContent(content: string, cited: string | undefined): Slices {
   if (!content || !cited) {
-    return { found: false, pre: content, mid: "", post: "" };
+    return { found: false, level: "miss", pre: content, mid: "", post: "" };
   }
 
   // L1: original 40-char prefix (fast path, ~90% of citations)
   let idx = content.indexOf(cited.slice(0, Math.min(40, cited.length)));
+  let level: Level | null = idx >= 0 ? "L1" : null;
 
   // L2: shorter 25-char prefix (some reformat affects beyond char 25)
-  if (idx < 0 && cited.length >= 25) {
+  if (level === null && cited.length >= 25) {
     idx = content.indexOf(cited.slice(0, 25));
+    if (idx >= 0) level = "L2";
   }
 
   // L3: whitespace-normalised match — collapses `\s+` to one space on both
   //     sides, runs indexOf, then maps the normalised offset back to the
   //     original content offset via a precomputed index map.
-  if (idx < 0) {
+  if (level === null) {
     const probe = cited
       .slice(0, Math.min(40, cited.length))
       .replace(/\s+/g, " ")
       .trim();
     idx = findNormalized(content, probe);
+    if (idx >= 0) level = "L3";
   }
 
   // L4: 15-char fallback for very heavily reformatted citations
-  if (idx < 0 && cited.length >= 15) {
+  if (level === null && cited.length >= 15) {
     idx = content.indexOf(cited.slice(0, 15));
+    if (idx >= 0) level = "L4";
   }
 
-  if (idx < 0) {
-    return { found: false, pre: content, mid: "", post: "" };
+  if (level === null) {
+    return { found: false, level: "miss", pre: content, mid: "", post: "" };
   }
 
   const end = Math.min(content.length, idx + cited.length);
   return {
     found: true,
+    level,
     pre: content.slice(0, idx),
     mid: content.slice(idx, end),
     post: content.slice(end),
   };
 }
+
+const LEVEL_TIPS: Record<Level, string> = {
+  L1: "命中 L1:cited_text 前 40 字在源全文中精确匹配",
+  L2: "命中 L2:cited_text 前 25 字精确匹配(reformat 略前置)",
+  L3: "命中 L3:空白标准化后匹配(原文有换行/多空格差异)",
+  L4: "命中 L4:cited_text 前 15 字兜底匹配(可能偏移几行)",
+  miss: "未命中:NotebookLM 内部 reformat 太多,无法在全文中定位",
+};
 
 /**
  * Walk `content`, collapse runs of whitespace to a single space, and remember

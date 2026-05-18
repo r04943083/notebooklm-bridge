@@ -1,4 +1,4 @@
-import { BookOpen, Check, ChevronDown, History } from "lucide-react";
+import { BookOpen, Check, ChevronDown, History, LogOut } from "lucide-react";
 import { BridgeLogo } from "@/components/BridgeLogo";
 import { UserAvatar } from "@/components/UserAvatar";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -171,13 +171,42 @@ export function TopBar({
 
         <ThemeToggle />
 
-        {/* User chip */}
-        <div className="ml-1 flex items-center gap-2 rounded-full border border-border bg-card pl-1 pr-3 py-1 text-xs">
-          <UserAvatar id={userId} size="md" />
-          <span className="font-medium" title={`X-User-Id: ${userId}`}>
-            {userId}
-          </span>
-        </div>
+        {/* User chip — click to switch user. We deliberately do NOT erase
+         * the old user's localStorage data (history/turns/notebookId), so
+         * the old user can come back later and find their conversations. */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="ml-1 flex items-center gap-2 rounded-full border border-border bg-card pl-1 pr-3 py-1 text-xs transition-colors hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label={`当前用户:${userId},点击切换`}
+              title={`X-User-Id: ${userId}`}
+            >
+              <UserAvatar id={userId} size="md" />
+              <span className="font-medium">{userId}</span>
+              <ChevronDown className="size-3 opacity-60" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-[180px]">
+            <DropdownMenuLabel className="text-xs">
+              当前用户:<span className="font-medium text-foreground">{userId}</span>
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={() => {
+                // Only clear the "who is logged in" pointer. The user's
+                // history / turns / notebook stay in localStorage so they
+                // come back to them if they log in again.
+                localStorage.removeItem("nblm_user_id");
+                window.location.reload();
+              }}
+              className="gap-2 text-sm"
+            >
+              <LogOut className="size-4" />
+              切换用户
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </header>
   );

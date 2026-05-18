@@ -11,17 +11,25 @@ import {
 } from "@/components/ui/dialog";
 
 interface UserPromptProps {
-  onSubmit: (userId: string) => void;
+  /** Kept for compatibility but unused: we reload so all per-user state
+   *  initialisers in App.tsx pick up the new userId from localStorage. */
+  onSubmit?: (userId: string) => void;
 }
 
 /**
- * Hard-gate dialog shown on first visit (or after the user cleared localStorage)
- * to capture an internal name / 工号. This is purely for per-user session
- * isolation in the backend Store — never sent to Google.
+ * Hard-gate dialog shown on first visit (or after "switch user" / cleared
+ * localStorage) to capture an internal name / 工号. This is purely for per-user
+ * session isolation in the backend Store — never sent to Google.
  *
  * Non-dismissible: blocking the entire app behind this is the whole point.
  * Validation mirrors the backend `require_internal_user` rules (max 64, no
  * pipe, no control chars) so we fail fast in the browser.
+ *
+ * Submission strategy: we write to localStorage and trigger a full page
+ * reload. That way the lazy `useState` initialisers in App.tsx (history,
+ * activeConversationId, notebookId, initialTurns) read from `nblm_*:<userId>`
+ * keys for the NEW userId — without a reload they'd stay frozen at whatever
+ * userId mounted the component (typically the empty string).
  */
 export function UserPrompt({ onSubmit }: UserPromptProps) {
   const [name, setName] = useState("");
@@ -46,7 +54,10 @@ export function UserPrompt({ onSubmit }: UserPromptProps) {
       return;
     }
     setUserId(v);
-    onSubmit(v);
+    onSubmit?.(v);
+    // Full reload so all per-user lazy initialisers (history, activeCid,
+    // turns, notebookId) pick up `nblm_*:${v}` keys for the new identity.
+    window.location.reload();
   };
 
   return (
