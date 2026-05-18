@@ -14,7 +14,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api } from "@/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { useCitationViewer, useNotebookId, useSourceLookup } from "@/lib/chat-context";
 import { cn } from "@/lib/utils";
@@ -192,8 +191,14 @@ export function CitationDrawer() {
             }
           />
 
-          <ScrollArea className="min-h-0 flex-1">
-            <div className="space-y-4 px-4 py-4">
+          {/* Native overflow-y-auto instead of Radix ScrollArea: the latter
+            * wraps children in a `display: table` viewport that swallowed the
+            * px-4 padding, making the inner fulltext card touch the drawer's
+            * right wall. Native scroll + `scrollbar-width: thin` (set in
+            * globals.css) keeps the visual lightweight without breaking the
+            * padding model. */}
+          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+            <div className="flex flex-col gap-4 p-4">
               <SourceHeader
                 title={title}
                 url={source?.url ?? fulltext?.url ?? null}
@@ -222,7 +227,7 @@ export function CitationDrawer() {
                 citedText={citation?.text}
               />
             </div>
-          </ScrollArea>
+          </div>
 
           {isSource && (
             <div className="border-t border-border bg-muted/40 px-4 py-2 text-[11px] leading-relaxed text-muted-foreground">
