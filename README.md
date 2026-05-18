@@ -68,6 +68,44 @@ Each service is wrapped in `scripts/_supervise.sh`, so a single crash gets
 auto-restarted; >5 crashes in 30s triggers a 30s back-off. Logs go to
 `.backend.log` and `.frontend.log` at the project root.
 
+## Packaging & Deployment
+
+To roll the bridge out onto another LAN host, build a self-contained release
+tarball:
+
+```bash
+scripts/pack.sh
+# → dist/notebooklm-bridge-v0.1.0.tar.gz  (+ .sha256 sidecar)
+```
+
+The tarball bundles: backend `.py` sources, the pre-built frontend `dist/`,
+offline pip `wheels/`, the dev scripts, and a `deploy.sh` / `update.sh` /
+`README_DEPLOY.md` for the target host. It does *not* bundle `secrets/` or
+`.env` — those stay on the operator's side.
+
+On the target host:
+
+```bash
+tar -xzf notebooklm-bridge-v0.1.0.tar.gz
+cd notebooklm-bridge-v0.1.0
+bash deploy.sh
+# Then: drop in secrets/auth.json (chmod 600) and edit .env
+#       with INTERNAL_AUTH_SHARED_SECRET=$(openssl rand -hex 32)
+bash scripts/start-web.sh
+```
+
+Upgrading an existing install reuses `.venv` / `.env` / `secrets/` automatically:
+
+```bash
+tar -xzf notebooklm-bridge-v<NEW>.tar.gz
+cd notebooklm-bridge-v<NEW>
+bash update.sh /path/to/old/install
+bash scripts/start-web.sh
+```
+
+The full checklist (security, port firewall, troubleshooting) lives in
+[`scripts/README_DEPLOY.md`](scripts/README_DEPLOY.md).
+
 ## API surface
 
 All non-`/healthz` endpoints require two headers:
@@ -133,21 +171,27 @@ without `notebooklm-py` installed.
 
 ```
 notebooklm-bridge/
-├── backend/          FastAPI app, store, auth, routes
-├── frontend/         React 19 + Vite + TypeScript
-├── scripts/          start-web / stop-web / status-web / _supervise
-├── tests/            pytest (no notebooklm-py needed at test time)
-├── docs/             runbooks + notebooklm-py integration guide
-├── plan.md           Design document
-├── CLAUDE.md         Project-wide development rules
-└── pyproject.toml    Python packaging
+├── backend/                  FastAPI app, store, auth, routes
+├── frontend/                 React 19 + Vite + TypeScript
+├── scripts/
+│   ├── start-web / stop-web / status-web / _supervise   (dev daemon mgmt)
+│   ├── pack.sh                                          (build release tarball)
+│   ├── deploy.sh / update.sh                            (run on target host)
+│   └── README_DEPLOY.md                                 (deploy runbook)
+├── tests/                    pytest (no notebooklm-py needed at test time)
+├── docs/                     runbooks + notebooklm-py integration guide
+├── dist/                     release tarballs from pack.sh (gitignored)
+├── requirements-runtime.txt  flat dep list for offline `pip download`
+├── plan.md                   Design document
+├── CLAUDE.md                 Project-wide development rules
+└── pyproject.toml            Python packaging
 ```
 
 ## Phases
 
 * [x] Phase 0 — design (`plan.md`)
-* [ ] Phase 1 — CLI verified (auth.json works, `notebooklm chat ask` returns answers)
-* [ ] Phase 2 — bridge + multi-user frontend (code complete; verify end-to-end after Phase 1)
+* [x] Phase 1 — CLI verified (auth.json works, `notebooklm chat ask` returns answers)
+* [x] Phase 2 — bridge + multi-user frontend (CitationDrawer, history, packaging)
 * [ ] Phase 3 — Feishu bot
 * [ ] Phase 4 — Studio (optional; not in roadmap)
 
