@@ -1,47 +1,65 @@
-// The main Q&A pane. Owns the in-memory conversation (turns) for the currently
-// selected notebook. Server keeps the authoritative conversation_id; we only
-// resend it implicitly by including X-User-Id (the backend's Store maps
-// (user_id, notebook_id) → conversation_id).
-
+import { AlertCircle, MessageSquareText, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { api } from "../api";
-import type { ChatTurn, HistoryEntry } from "../types";
+import { api } from "@/api";
+import { CitationModal } from "@/components/CitationModal";
+import { ChatComposer } from "@/components/ChatComposer";
+import { ChatTurn } from "@/components/ChatTurn";
+import { CitationViewerProvider } from "@/lib/chat-context";
+import type { ChatTurn as ChatTurnType } from "@/types";
 
-interface Props {
+interface ChatPaneProps {
   notebookId: string;
-  onTurn: (turn: ChatTurn) => void;
+  notebookTitle?: string;
+  onTurn: (turn: ChatTurnType) => void;
 }
 
-export default function ChatPane({ notebookId, onTurn }: Props) {
-  const [question, setQuestion] = useState("");
-  const [turns, setTurns] = useState<ChatTurn[]>([]);
+/**
+ * Central conversation pane. Holds local turn state, calls /api/chat / reset,
+ * scrolls to the newest message after each turn, and renders the per-chat
+ * CitationModal under its own provider so chip clicks anywhere in the turn
+ * stream open the same modal.
+ *
+ * State only lives in memory — closing the tab loses turns; rebuilding from
+ * the backend store would require an /api/chat/history endpoint that we don't
+ * have yet. The TopBar history popover bridges the gap by letting users see
+ * past conversation IDs.
+ */
+export function ChatPane({ notebookId, notebookTitle, onTurn }: ChatPaneProps) {
+  const [turns, setTurns] = useState<ChatTurnType[]>([]);
   const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const scrollerRef = useRef<HTMLDivElement>(null);
   const lastNotebook = useRef(notebookId);
 
-  // Clear local view when the notebook changes — server-side context still lives
-  // in the backend Store keyed on (user, notebook).
+  // Switching notebooks resets the local conversation — backend Store still
+  // keeps the (user, notebook) → conversation_id pair so the next ask resumes.
   useEffect(() => {
     if (lastNotebook.current !== notebookId) {
       setTurns([]);
-      setErr(null);
+      setError(null);
       lastNotebook.current = notebookId;
     }
   }, [notebookId]);
 
-  const submit = async (reset = false) => {
-    const q = question.trim();
-    if (!q || !notebookId || loading) return;
+  // Pin scroll to bottom after each new turn.
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    requestAnimationFrame(() => {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    });
+  }, [turns.length, loading]);
+
+  const submit = async (question: string) => {
     setLoading(true);
-    setErr(null);
+    setError(null);
     try {
-      const resp = await api.ask({ notebook_id: notebookId, question: q, reset });
-      const turn: ChatTurn = { question: q, response: resp };
+      const resp = await api.ask({ notebook_id: notebookId, question });
+      const turn: ChatTurnType = { question, response: resp };
       setTurns((prev) => [...prev, turn]);
       onTurn(turn);
-      setQuestion("");
     } catch (e) {
-      setErr((e as Error).message);
+      setError((e as Error).message);
     } finally {
       setLoading(false);
     }
@@ -49,83 +67,84 @@ export default function ChatPane({ notebookId, onTurn }: Props) {
 
   const newConversation = async () => {
     if (!notebookId) return;
+    setError(null);
     try {
       await api.resetChat(notebookId);
       setTurns([]);
-      setErr(null);
     } catch (e) {
-      setErr((e as Error).message);
+      setError((e as Error).message);
     }
   };
 
   return (
-    <div className="chat-pane">
-      <div className="chat-history">
-        {turns.length === 0 && (
-          <div className="hint">尚无对话。提问下方的输入框开始。</div>
-        )}
-        {turns.map((t, i) => (
-          <ChatTurnView key={i} turn={t} />
-        ))}
-        {loading && <div className="loading">等待 NotebookLM 回复 …</div>}
-        {err && <div className="error">错误:{err}</div>}
-      </div>
-      <div className="chat-input">
-        <textarea
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) submit();
-          }}
-          placeholder="输入问题(Ctrl/Cmd+Enter 发送)"
-          rows={3}
-          disabled={loading}
-        />
-        <div className="chat-buttons">
-          <button onClick={() => submit()} disabled={loading || !question.trim()}>
-            发送
-          </button>
-          <button onClick={newConversation} disabled={loading}>
-            新对话
-          </button>
+    <CitationViewerProvider>
+      <div className="flex h-full min-h-0 flex-col">
+        <div
+          ref={scrollerRef}
+          className="min-h-0 flex-1 overflow-y-auto"
+        >
+          <div className="mx-auto flex max-w-3xl flex-col gap-4 px-4 py-6">
+            {turns.length === 0 && !loading && (
+              <EmptyState notebookTitle={notebookTitle} />
+            )}
+
+            {turns.map((t, i) => (
+              <ChatTurn key={i} turn={t} />
+            ))}
+
+            {loading && <ThinkingIndicator />}
+
+            {error && (
+              <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                <AlertCircle className="mt-0.5 size-4 shrink-0" />
+                <span className="break-words">{error}</span>
+              </div>
+            )}
+          </div>
         </div>
+
+        <ChatComposer
+          onSubmit={submit}
+          onNewConversation={newConversation}
+          loading={loading}
+          disabled={!notebookId}
+          hasTurns={turns.length > 0}
+        />
+
+        <CitationModal />
       </div>
-    </div>
+    </CitationViewerProvider>
   );
 }
 
-function ChatTurnView({ turn }: { turn: ChatTurn }) {
+function EmptyState({ notebookTitle }: { notebookTitle?: string }) {
   return (
-    <div className="turn">
-      <div className="q">
-        <strong>问:</strong>
-        <span>{turn.question}</span>
+    <div className="mt-16 flex flex-col items-center gap-3 text-center">
+      <div className="rounded-full bg-accent-soft p-3 text-accent">
+        <Sparkles className="size-6" />
       </div>
-      <div className="a">
-        <strong>答:</strong>
-        <p>{renderAnswerWithCitations(turn.response.answer)}</p>
-      </div>
-      {turn.response.citations.length > 0 && (
-        <ol className="citations">
-          {turn.response.citations.map((c, i) => (
-            <li key={i}>
-              <strong>[{i + 1}]</strong> {c.source_title}
-              {c.page != null && ` p.${c.page}`}
-              {c.text && <span className="snippet"> — {c.text}</span>}
-            </li>
-          ))}
-        </ol>
-      )}
+      <h3 className="text-base font-semibold">
+        {notebookTitle ? `开始向 ${notebookTitle} 提问` : "开始一段新对话"}
+      </h3>
+      <p className="max-w-sm text-sm text-muted-foreground">
+        输入问题,NotebookLM 会基于你这个 notebook 里的所有来源回答,并标注引用。
+      </p>
     </div>
   );
 }
 
-function renderAnswerWithCitations(answer: string): string {
-  // NotebookLM returns citation markers inline as [n] in the answer text already.
-  // We render the string verbatim; the numbered list below provides the lookup.
-  return answer;
+function ThinkingIndicator() {
+  return (
+    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+      <MessageSquareText className="size-4" />
+      <span className="inline-flex items-center gap-1">
+        正在思考
+        <span className="inline-flex">
+          <span className="h-1 w-1 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.3s]" />
+          <span className="mx-0.5 h-1 w-1 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.15s]" />
+          <span className="h-1 w-1 animate-bounce rounded-full bg-muted-foreground" />
+        </span>
+      </span>
+    </div>
+  );
 }
-
-// HistoryEntry is exported via types.ts; we don't construct it here directly,
-// but ChatTurn → HistoryEntry conversion lives in App.tsx where onTurn fires.
-export type { HistoryEntry };

@@ -1,29 +1,48 @@
-// Blocking modal that captures the user's name on first visit and stores it in
-// localStorage["nblm_user_id"]. From that point onwards every API request is
-// sent with header X-User-Id.
-//
-// We intentionally don't validate format on the client — the backend's auth
-// dependency is the source of truth (max 64 chars, no '|', no control chars).
-
+import { Sparkles, UserCircle2 } from "lucide-react";
 import { useState } from "react";
-import { setUserId } from "../api";
+import { setUserId } from "@/api";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
-interface Props {
+interface UserPromptProps {
   onSubmit: (userId: string) => void;
 }
 
-export default function UserPrompt({ onSubmit }: Props) {
+/**
+ * Hard-gate dialog shown on first visit (or after the user cleared localStorage)
+ * to capture an internal name / 工号. This is purely for per-user session
+ * isolation in the backend Store — never sent to Google.
+ *
+ * Non-dismissible: blocking the entire app behind this is the whole point.
+ * Validation mirrors the backend `require_internal_user` rules (max 64, no
+ * pipe, no control chars) so we fail fast in the browser.
+ */
+export function UserPrompt({ onSubmit }: UserPromptProps) {
   const [name, setName] = useState("");
   const [err, setErr] = useState<string | null>(null);
 
-  const submit = () => {
+  const handleSubmit = () => {
     const v = name.trim();
     if (!v) {
       setErr("请填写名字或工号");
       return;
     }
-    if (v.length > 64 || v.includes("|") || /[\r\n\t]/.test(v)) {
-      setErr("名字过长或包含禁止字符");
+    if (v.length > 64) {
+      setErr("不能超过 64 个字符");
+      return;
+    }
+    if (v.includes("|")) {
+      setErr("不能包含 | 字符");
+      return;
+    }
+    if (/[\r\n\t]/.test(v)) {
+      setErr("不能包含换行 / 制表符");
       return;
     }
     setUserId(v);
@@ -31,22 +50,64 @@ export default function UserPrompt({ onSubmit }: Props) {
   };
 
   return (
-    <div className="modal-backdrop">
-      <div className="modal">
-        <h2>欢迎使用 NotebookLM Bridge</h2>
-        <p>请输入你的名字或工号(仅用于会话隔离,不发送给 Google):</p>
-        <input
-          type="text"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && submit()}
-          autoFocus
-          maxLength={64}
-          placeholder="如 zhangsan / 12345"
-        />
-        {err && <p className="error">{err}</p>}
-        <button onClick={submit}>开始使用</button>
-      </div>
-    </div>
+    <Dialog open>
+      <DialogContent
+        hideCloseButton
+        // Prevent ESC / overlay-click from dismissing — login is a hard gate.
+        onPointerDownOutside={(e) => e.preventDefault()}
+        onEscapeKeyDown={(e) => e.preventDefault()}
+        onInteractOutside={(e) => e.preventDefault()}
+        className="sm:max-w-md"
+      >
+        <DialogHeader>
+          <div className="flex items-center gap-2">
+            <Sparkles className="size-5 text-accent" />
+            <DialogTitle>欢迎使用 NotebookLM Bridge</DialogTitle>
+          </div>
+          <DialogDescription>
+            请输入你的名字或工号(仅用于会话隔离,不会发给 Google)。
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-2">
+          <div className="relative">
+            <UserCircle2 className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => {
+                setName(e.target.value);
+                if (err) setErr(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleSubmit();
+                }
+              }}
+              autoFocus
+              maxLength={64}
+              placeholder="例如 zhangsan / 12345"
+              aria-invalid={err ? "true" : undefined}
+              aria-describedby={err ? "user-prompt-error" : undefined}
+              className="w-full rounded-md border border-input bg-background py-2 pl-9 pr-3 text-sm outline-none transition-colors focus:border-accent/40 focus:ring-2 focus:ring-ring/20"
+            />
+          </div>
+          {err && (
+            <p
+              id="user-prompt-error"
+              role="alert"
+              className="text-xs text-destructive"
+            >
+              {err}
+            </p>
+          )}
+        </div>
+
+        <Button type="button" onClick={handleSubmit} className="w-full">
+          开始使用
+        </Button>
+      </DialogContent>
+    </Dialog>
   );
 }

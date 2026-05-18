@@ -1,9 +1,24 @@
 <!doctype html>
-<html lang="zh">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
     <title>NotebookLM Bridge</title>
+
+    <!--
+      Open-source fonts loaded from Google Fonts (SIL OFL licensed):
+        Inter        — Latin sans-serif (UI text)
+        Noto Sans SC — Simplified Chinese fallback
+        JetBrains Mono — monospace for inline code / pre blocks
+      `preconnect` cuts ~100ms off first font byte; `display=swap` avoids FOIT.
+    -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600;700&display=swap"
+    />
   </head>
   <body>
     <div id="root"></div>

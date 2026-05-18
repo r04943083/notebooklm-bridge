@@ -1,0 +1,109 @@
+@import "tailwindcss";
+
+/* Tailwind v4 dark mode trigger — toggle the `dark` class on <html> (next-themes
+ * does this for us). `not()` means "elements that are NOT under .dark also get
+ * the default scheme" — keeps light the implicit baseline. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* CSS variables — light theme defaults at :root, dark overrides under .dark.
+ * We mirror them into Tailwind's color token space inside @theme so that
+ * `bg-background`, `text-foreground`, `border-border`, etc. resolve correctly.
+ * Palette is intentionally neutral (slate + sky) — see plan §IP boundary. */
+:root {
+  --background: 0 0% 100%;
+  --foreground: 222 47% 11%;
+  --muted: 210 40% 96%;
+  --muted-foreground: 215 16% 47%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+  --border: 214 32% 91%;
+  --input: 214 32% 91%;
+  --ring: 199 89% 48%;
+  --accent: 199 89% 48%;
+  --accent-foreground: 0 0% 100%;
+  --accent-soft: 204 94% 94%;
+  --accent-soft-foreground: 204 80% 22%;
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 100%;
+  --radius: 0.625rem;
+
+  /* Font stacks — Inter for Latin, Noto Sans SC for CJK, JetBrains Mono for code.
+   * All three load via <link> in index.html from Google Fonts and are SIL OFL
+   * licensed (open source, freely redistributable). */
+  --font-sans: "Inter", "Noto Sans SC", ui-sans-serif, system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+.dark {
+  --background: 222 24% 7%;
+  --foreground: 210 20% 96%;
+  --muted: 217 19% 14%;
+  --muted-foreground: 215 16% 65%;
+  --card: 222 22% 9%;
+  --card-foreground: 210 20% 96%;
+  --border: 217 19% 18%;
+  --input: 217 19% 18%;
+  --ring: 199 89% 60%;
+  --accent: 199 89% 60%;
+  --accent-foreground: 222 47% 11%;
+  --accent-soft: 199 60% 18%;
+  --accent-soft-foreground: 204 94% 90%;
+  --destructive: 0 62% 51%;
+  --destructive-foreground: 0 0% 100%;
+}
+
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-accent-soft: hsl(var(--accent-soft));
+  --color-accent-soft-foreground: hsl(var(--accent-soft-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+}
+
+/* Base resets / smoothing — kept minimal. */
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: var(--font-sans);
+  font-feature-settings:
+    "rlig" 1,
+    "calt" 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Avoid CLS while custom fonts load. */
+.font-mono {
+  font-family: var(--font-mono);
+}
+
+/* Custom scrollbars in dark mode look much better thinner — applies globally,
+ * Radix ScrollArea components will use their own bar. */
+* {
+  scrollbar-width: thin;
+}
