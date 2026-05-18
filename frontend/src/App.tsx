@@ -1,3 +1,4 @@
+import { AlertCircle, RotateCw } from "lucide-react";
 import { ThemeProvider } from "next-themes";
 import { useCallback, useEffect, useState } from "react";
 import { api, getUserId } from "@/api";
@@ -7,6 +8,7 @@ import { SourcesPanel } from "@/components/SourcesPanel";
 import { StudioStub } from "@/components/StudioStub";
 import { TopBar } from "@/components/TopBar";
 import { UserPrompt } from "@/components/UserPrompt";
+import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { SourcesProvider } from "@/lib/chat-context";
 import type { ChatTurn, HistoryEntry, Notebook, Source } from "@/types";
@@ -52,9 +54,10 @@ export default function App() {
 
   const [history, setHistory] = useState<HistoryEntry[]>(loadHistory);
 
-  // Pull the notebook list as soon as we know who the user is.
-  useEffect(() => {
-    if (!userId) return;
+  // Load notebooks list. Extracted into a callback so the retry button on the
+  // error UI can call it directly. The effect below kicks it on userId changes.
+  const loadNotebooks = useCallback(() => {
+    if (!userId) return () => {};
     let alive = true;
     setNotebooksLoading(true);
     setNotebooksError(null);
@@ -73,8 +76,14 @@ export default function App() {
     return () => {
       alive = false;
     };
+    // notebookId is read but intentionally not in deps — we only want this to
+    // refire on userId change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
+
+  useEffect(() => {
+    return loadNotebooks();
+  }, [loadNotebooks]);
 
   // Fetch sources whenever the selected notebook changes.
   useEffect(() => {
@@ -148,7 +157,7 @@ export default function App() {
   return (
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
       <TooltipProvider delayDuration={200}>
-        <SourcesProvider sources={sources}>
+        <SourcesProvider notebookId={notebookId || null} sources={sources}>
           <AppShell
             topBar={
               <TopBar
@@ -178,10 +187,33 @@ export default function App() {
                 onTurn={handleTurn}
               />
             ) : (
-              <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
-                {notebooks.length === 0 && !notebooksLoading
-                  ? "这个 Google 账号还没有 notebook,先去 NotebookLM 网页里新建一个。"
-                  : "请在顶栏选择一个 notebook。"}
+              <div className="flex h-full items-center justify-center px-6 text-center text-sm">
+                {notebooksError ? (
+                  <div className="flex flex-col items-center gap-3">
+                    <div className="flex items-center gap-2 text-destructive">
+                      <AlertCircle className="size-4 shrink-0" />
+                      <span>无法加载 notebooks:{notebooksError}</span>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={loadNotebooks}
+                      disabled={notebooksLoading}
+                      className="gap-1.5"
+                    >
+                      <RotateCw className="size-3.5" />
+                      重试
+                    </Button>
+                  </div>
+                ) : notebooks.length === 0 && !notebooksLoading ? (
+                  <span className="text-muted-foreground">
+                    这个 Google 账号还没有 notebook,先去 NotebookLM 网页里新建一个。
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">
+                    请在顶栏选择一个 notebook。
+                  </span>
+                )}
               </div>
             )}
           </AppShell>

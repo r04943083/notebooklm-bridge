@@ -61,8 +61,12 @@ export function ChatComposer({
           "focus-within:border-accent/40 focus-within:shadow-md"
         )}
       >
+        <label htmlFor="chat-composer-textarea" className="sr-only">
+          提问内容
+        </label>
         <textarea
           ref={textareaRef}
+          id="chat-composer-textarea"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -86,6 +90,7 @@ export function ChatComposer({
             size="sm"
             onClick={onNewConversation}
             disabled={loading || !hasTurns}
+            aria-label="开始新对话(清空当前会话)"
             className="gap-1.5"
           >
             <RotateCcw className="size-3.5" />
@@ -96,6 +101,7 @@ export function ChatComposer({
             size="sm"
             onClick={submit}
             disabled={!canSubmit}
+            aria-label="发送(Ctrl/Cmd + Enter)"
             className="gap-1.5"
           >
             {loading ? (

@@ -8,7 +8,25 @@ import type {
   HealthResponse,
   Notebook,
   Source,
+  SourceFulltext,
 } from "./types";
+
+/**
+ * Surfaces the HTTP status so callers can branch on it (e.g. retry only on
+ * 503/504). Existing call sites that read `.message` keep working — ApiError
+ * extends Error.
+ *
+ * The status field is declared explicitly rather than as a TS parameter
+ * property because tsconfig has `erasableSyntaxOnly` enabled.
+ */
+export class ApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
 
 const API_BASE = "/api";
 
@@ -42,7 +60,7 @@ async function request<T>(path: string, opt?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`API ${res.status}: ${text}`);
+    throw new ApiError(res.status, `API ${res.status}: ${text}`);
   }
   return res.json() as Promise<T>;
 }
@@ -53,6 +71,11 @@ export const api = {
   listSources: (notebook_id: string) =>
     request<Source[]>(
       `/sources?notebook_id=${encodeURIComponent(notebook_id)}`
+    ),
+
+  getSourceFulltext: (notebook_id: string, source_id: string) =>
+    request<SourceFulltext>(
+      `/sources/${encodeURIComponent(source_id)}/fulltext?notebook_id=${encodeURIComponent(notebook_id)}`
     ),
 
   ask: (req: ChatRequest) =>

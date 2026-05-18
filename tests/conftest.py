@@ -116,10 +116,63 @@ class FakeClient:
             return [SimpleNamespace(id="nb-1", title="Notebook 1", updated_at=None)]
 
         async def _list_src(notebook_id: str) -> list[Any]:
-            return [SimpleNamespace(id="s1", title="Source 1", kind="pdf")]
+            # Mirror notebooklm-py 0.4.x Source surface so the new mapping
+            # branches in _list_sources (url / created_at / status) get
+            # exercised even though no test asserts on the values directly.
+            return [
+                SimpleNamespace(
+                    id="s1",
+                    title="Source 1",
+                    kind="pdf",
+                    url=None,
+                    created_at=None,
+                    status=2,  # ready
+                ),
+                SimpleNamespace(
+                    id="s2",
+                    title="A web link",
+                    kind="web_page",
+                    url="https://example.com",
+                    created_at=None,
+                    status=2,
+                ),
+            ]
+
+        # Per-test knobs for sources.get_fulltext, exposed on the namespace so
+        # tests can poke them after fixture setup (mirrors the FakeChat pattern).
+        sources_ns = SimpleNamespace()
+        sources_ns.next_fulltext_delay = 0.0
+        sources_ns.next_fulltext_exc = None
+        sources_ns.fulltext_title = "Source 1"
+        sources_ns.fulltext_kind = "pdf"
+        sources_ns.fulltext_url = None
+        sources_ns.fulltext_content = "Hello world, this is the fulltext."
+        sources_ns.fulltext_calls: list[dict[str, str]] = []
+
+        async def _get_fulltext(notebook_id: str, source_id: str) -> Any:
+            sources_ns.fulltext_calls.append(
+                {"notebook_id": notebook_id, "source_id": source_id}
+            )
+            if sources_ns.next_fulltext_delay > 0:
+                await asyncio.sleep(sources_ns.next_fulltext_delay)
+            if sources_ns.next_fulltext_exc is not None:
+                exc = sources_ns.next_fulltext_exc
+                sources_ns.next_fulltext_exc = None
+                raise exc
+            return SimpleNamespace(
+                source_id=source_id,
+                title=sources_ns.fulltext_title,
+                content=sources_ns.fulltext_content,
+                kind=sources_ns.fulltext_kind,
+                url=sources_ns.fulltext_url,
+                char_count=len(sources_ns.fulltext_content),
+            )
+
+        sources_ns.list = _list_src
+        sources_ns.get_fulltext = _get_fulltext
 
         self.notebooks = SimpleNamespace(list=_list_nb)
-        self.sources = SimpleNamespace(list=_list_src)
+        self.sources = sources_ns
 
     async def close(self) -> None:  # pragma: no cover - trivial
         return None

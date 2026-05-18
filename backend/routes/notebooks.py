@@ -24,6 +24,11 @@ router = APIRouter()
 
 _CACHE_TTL_SECONDS = 30.0
 
+# notebooklm-py 0.4.x Source.status is an int from SourceStatus
+# (1=PROCESSING, 2=READY, 3=ERROR). Mirror that into a short string the
+# frontend can switch on without importing the upstream enum.
+_STATUS_CODE_TO_STR: dict[int, str] = {1: "processing", 2: "ready", 3: "error"}
+
 
 class _TTLCache:
     """Thin async-friendly TTL cache. One lock per key to avoid stampedes."""
@@ -97,13 +102,28 @@ async def list_sources(
 
     async def _load() -> list[Source]:
         items = await client.sources.list(notebook_id)
-        return [
-            Source(
-                id=getattr(it, "id", ""),
-                title=getattr(it, "title", ""),
-                kind=getattr(it, "kind", None),
+        out: list[Source] = []
+        for it in items:
+            kind_raw = getattr(it, "kind", None)
+            kind_str: str | None = str(kind_raw) if kind_raw is not None else None
+            created: Any = getattr(it, "created_at", None)
+            if created is None:
+                created_str: str | None = None
+            elif hasattr(created, "isoformat"):
+                created_str = created.isoformat()
+            else:
+                created_str = str(created)
+            status_str = _STATUS_CODE_TO_STR.get(int(getattr(it, "status", 0) or 0))
+            out.append(
+                Source(
+                    id=getattr(it, "id", ""),
+                    title=getattr(it, "title", "") or "",
+                    kind=kind_str,
+                    url=getattr(it, "url", None),
+                    created_at=created_str,
+                    status=status_str,
+                )
             )
-            for it in items
-        ]
+        return out
 
     return await _cache.get_or_set(f"sources:{notebook_id}", _load)

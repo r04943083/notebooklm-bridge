@@ -42,6 +42,11 @@ def _coerce_citations(raw: Any) -> list[Citation]:
     care which upstream version the bridge is running against. Older releases
     that used ``citations / source_title / text / page`` still work because we
     look up either name via ``getattr``.
+
+    ``start_char``/``end_char`` are surfaced but per upstream documentation they
+    point into NotebookLM's *internal chunked index*, NOT into the source
+    fulltext — see ``SourceFulltext.find_citation_context``. We pass them
+    through for debugging value; the frontend does a substring search instead.
     """
     out: list[Citation] = []
     if not raw:
@@ -54,6 +59,8 @@ def _coerce_citations(raw: Any) -> list[Citation]:
                     source_title=str(c.get("source_title", "")),
                     text=str(c.get("cited_text") or c.get("text") or ""),
                     page=c.get("citation_number") or c.get("page"),
+                    start_char=c.get("start_char"),
+                    end_char=c.get("end_char"),
                 )
             )
         else:
@@ -69,6 +76,8 @@ def _coerce_citations(raw: Any) -> list[Citation]:
                         getattr(c, "cited_text", None) or getattr(c, "text", "") or ""
                     ),
                     page=getattr(c, "citation_number", None) or getattr(c, "page", None),
+                    start_char=getattr(c, "start_char", None),
+                    end_char=getattr(c, "end_char", None),
                 )
             )
     return out

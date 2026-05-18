@@ -47,8 +47,21 @@ class SourceListItem(Protocol):
     title: str
 
 
+class SourceFulltextLike(Protocol):
+    source_id: str
+    title: str
+    content: str
+    char_count: int
+    # `url` and `kind` are accessed via getattr so we don't bind to a precise
+    # SourceType enum that upstream may rename.
+
+
 class SourcesLike(Protocol):
     async def list(self, notebook_id: str) -> list[SourceListItem]: ...
+
+    async def get_fulltext(
+        self, notebook_id: str, source_id: str
+    ) -> SourceFulltextLike: ...
 
 
 class NotebookLMClientLike(Protocol):

@@ -1,11 +1,38 @@
 import { AlertCircle, MessageSquareText, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { api } from "@/api";
+import { ApiError, api } from "@/api";
 import { CitationModal } from "@/components/CitationModal";
 import { ChatComposer } from "@/components/ChatComposer";
 import { ChatTurn } from "@/components/ChatTurn";
 import { CitationViewerProvider } from "@/lib/chat-context";
-import type { ChatTurn as ChatTurnType } from "@/types";
+import type { ChatRequest, ChatResponse, ChatTurn as ChatTurnType } from "@/types";
+
+/**
+ * api.ask with bounded exponential backoff on 504 (gateway timeout). 504 is
+ * the only retryable status we get from the bridge — 503 always means either
+ * "client not initialised" or "circuit open" / "upstream errored", none of
+ * which clear within sub-second retries. 4xx / 429 are user-side errors and
+ * must bubble immediately so the user sees the actual message.
+ */
+const RETRY_DELAYS_MS = [500, 1500] as const;
+async function askWithRetry(req: ChatRequest): Promise<ChatResponse> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await api.ask(req);
+    } catch (e) {
+      const retryable =
+        e instanceof ApiError &&
+        e.status === 504 &&
+        attempt < RETRY_DELAYS_MS.length;
+      if (!retryable) throw e;
+      // eslint-disable-next-line no-console
+      console.warn(
+        `chat.ask 504 — retrying in ${RETRY_DELAYS_MS[attempt]}ms (attempt ${attempt + 1}/${RETRY_DELAYS_MS.length})`
+      );
+      await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]));
+    }
+  }
+}
 
 interface ChatPaneProps {
   notebookId: string;
@@ -54,7 +81,7 @@ export function ChatPane({ notebookId, notebookTitle, onTurn }: ChatPaneProps) {
     setLoading(true);
     setError(null);
     try {
-      const resp = await api.ask({ notebook_id: notebookId, question });
+      const resp = await askWithRetry({ notebook_id: notebookId, question });
       const turn: ChatTurnType = { question, response: resp };
       setTurns((prev) => [...prev, turn]);
       onTurn(turn);
@@ -83,7 +110,13 @@ export function ChatPane({ notebookId, notebookTitle, onTurn }: ChatPaneProps) {
           ref={scrollerRef}
           className="min-h-0 flex-1 overflow-y-auto"
         >
-          <div className="mx-auto flex max-w-3xl flex-col gap-4 px-4 py-6">
+          <div
+            role="log"
+            aria-live="polite"
+            aria-atomic="false"
+            aria-label="对话历史"
+            className="mx-auto flex max-w-3xl flex-col gap-4 px-4 py-6"
+          >
             {turns.length === 0 && !loading && (
               <EmptyState notebookTitle={notebookTitle} />
             )}

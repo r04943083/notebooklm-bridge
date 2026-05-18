@@ -1,5 +1,6 @@
 import {
   AlertCircle,
+  ExternalLink,
   File,
   FileText,
   Globe,
@@ -11,6 +12,7 @@ import type { ComponentType } from "react";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { cn } from "@/lib/utils";
 import type { Source } from "@/types";
 
 interface SourcesPanelProps {
@@ -24,11 +26,37 @@ interface SourcesPanelProps {
 const KIND_ICON: Record<string, ComponentType<{ className?: string }>> = {
   pdf: FileText,
   url: Globe,
+  web_page: Globe,
   youtube: Youtube,
   video: Youtube,
   text: File,
   drive: File,
 };
+
+/**
+ * Render an upstream ISO datetime as a short Chinese relative-time string.
+ * Stays inline (no dayjs / date-fns) because the formatting is dead simple.
+ */
+function formatRelativeTime(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+  const diffMs = Date.now() - date.getTime();
+  const diffMin = Math.floor(diffMs / 60_000);
+  if (diffMin < 1) return "刚刚";
+  if (diffMin < 60) return `${diffMin} 分钟前`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr} 小时前`;
+  const diffDay = Math.floor(diffHr / 24);
+  if (diffDay < 30) return `${diffDay} 天前`;
+  const diffMon = Math.floor(diffDay / 30);
+  if (diffMon < 12) return `${diffMon} 个月前`;
+  return date.toLocaleDateString("zh-CN", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
 
 export function SourcesPanel({
   sources,
@@ -75,34 +103,88 @@ export function SourcesPanel({
           )}
           {!loading && !error && sources.length > 0 && (
             <ul className="space-y-1">
-              {sources.map((src) => {
-                const Icon =
-                  (src.kind && KIND_ICON[src.kind.toLowerCase()]) || File;
-                return (
-                  <li key={src.id}>
-                    <div className="group flex items-start gap-2.5 rounded-md p-2 transition-colors hover:bg-muted">
-                      <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-                      <div className="min-w-0 flex-1">
-                        <div
-                          className="line-clamp-2 text-sm leading-snug"
-                          title={src.title}
-                        >
-                          {src.title || src.id}
-                        </div>
-                        {src.kind && (
-                          <Badge variant="soft" className="mt-1.5">
-                            {src.kind}
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
-                  </li>
-                );
-              })}
+              {sources.map((src) => (
+                <li key={src.id}>
+                  <SourceRow source={src} />
+                </li>
+              ))}
             </ul>
           )}
         </div>
       </ScrollArea>
     </aside>
   );
+}
+
+/**
+ * One row in the sources list. Renders as an `<a>` opening in a new tab when
+ * `source.url` is set (web/YouTube), otherwise as a plain (non-interactive)
+ * `<div>` — PDFs / Drive files have no upstream-supplied viewer URL so there's
+ * nothing to navigate to from here.
+ */
+function SourceRow({ source: src }: { source: Source }) {
+  const Icon = (src.kind && KIND_ICON[src.kind.toLowerCase()]) || File;
+  const relTime = formatRelativeTime(src.created_at);
+  const isLink = !!src.url;
+
+  const inner = (
+    <>
+      <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-start gap-1.5">
+          <div
+            className="line-clamp-2 flex-1 text-sm leading-snug"
+            title={src.title}
+          >
+            {src.title || src.id}
+          </div>
+          {isLink && (
+            <ExternalLink
+              className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/70 transition-colors group-hover:text-accent"
+              aria-hidden="true"
+            />
+          )}
+        </div>
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          {src.kind && <Badge variant="soft">{src.kind}</Badge>}
+          {src.status === "processing" && (
+            <Badge variant="outline" className="gap-1 text-muted-foreground">
+              <Loader2 className="size-3 animate-spin" />
+              处理中
+            </Badge>
+          )}
+          {src.status === "error" && (
+            <Badge variant="destructive" className="gap-1">
+              <AlertCircle className="size-3" />
+              失败
+            </Badge>
+          )}
+          {relTime && (
+            <span className="text-[10px] text-muted-foreground/80">
+              {relTime}
+            </span>
+          )}
+        </div>
+      </div>
+    </>
+  );
+
+  const baseCls =
+    "group flex items-start gap-2.5 rounded-md p-2 transition-colors";
+
+  if (isLink) {
+    return (
+      <a
+        href={src.url ?? undefined}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={cn(baseCls, "hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring")}
+        title={`在新标签页打开:${src.url}`}
+      >
+        {inner}
+      </a>
+    );
+  }
+
+  return <div className={cn(baseCls, "hover:bg-muted")}>{inner}</div>;
 }

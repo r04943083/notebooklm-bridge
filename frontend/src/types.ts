@@ -12,6 +12,11 @@ export interface Citation {
   source_title: string;
   text: string;
   page?: number | null;
+  // Offsets in NotebookLM's internal chunked index, NOT positions in the
+  // source full text. Surfaced for debugging; the fulltext viewer uses a
+  // substring search on `text` instead.
+  start_char?: number | null;
+  end_char?: number | null;
 }
 
 export interface ChatResponse {
@@ -32,6 +37,20 @@ export interface Source {
   id: string;
   title: string;
   kind?: string | null;
+  // Web / YouTube sources expose their original URL; PDFs / Drive do not.
+  url?: string | null;
+  created_at?: string | null;
+  // "processing" | "ready" | "error" (mirror of upstream int code 1/2/3).
+  status?: string | null;
+}
+
+export interface SourceFulltext {
+  source_id: string;
+  title?: string | null;
+  kind?: string | null;
+  url?: string | null;
+  content: string;
+  char_count: number;
 }
 
 export interface HealthResponse {

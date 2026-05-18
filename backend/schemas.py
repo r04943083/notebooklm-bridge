@@ -21,6 +21,11 @@ class Citation(BaseModel):
     source_title: str
     text: str
     page: int | None = None
+    # Offsets in NotebookLM's internal chunked index. NOT positions in the
+    # source full text — surfaced for debugging only. See upstream
+    # SourceFulltext.find_citation_context docstring.
+    start_char: int | None = None
+    end_char: int | None = None
 
 
 class ChatResponse(BaseModel):
@@ -41,6 +46,20 @@ class Source(BaseModel):
     id: str
     title: str
     kind: str | None = None
+    # Web / YouTube sources expose their original URL; PDFs / Drive files do not.
+    url: str | None = None
+    created_at: str | None = None
+    # Mapped from upstream int code: 1=processing, 2=ready, 3=error.
+    status: str | None = None
+
+
+class SourceFulltext(BaseModel):
+    source_id: str
+    title: str | None = None
+    kind: str | None = None
+    url: str | None = None
+    content: str
+    char_count: int
 
 
 class HealthResponse(BaseModel):

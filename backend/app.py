@@ -30,6 +30,7 @@ from .logging_conf import setup_logging
 from .routes import chat as chat_route
 from .routes import health as health_route
 from .routes import notebooks as notebooks_route
+from .routes import sources as sources_route
 from .store import Store
 
 logger = logging.getLogger(__name__)
@@ -122,6 +123,7 @@ def create_app() -> FastAPI:
 
     application.include_router(health_route.router, prefix="/api")
     application.include_router(notebooks_route.router, prefix="/api")
+    application.include_router(sources_route.router, prefix="/api")
     application.include_router(chat_route.router, prefix="/api")
     return application
 

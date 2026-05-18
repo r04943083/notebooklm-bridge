@@ -9,27 +9,46 @@ import {
 import type { Citation, Source } from "@/types";
 
 // ---------------------------------------------------------------------------
-// SourcesContext — read-only access to the current notebook's source list so
-// CitationModal (and SourcesPanel, if it wants) can join by source_id without
-// prop drilling through ChatPane / ChatTurn / MarkdownAnswer / CitationChip.
+// SourcesContext — read-only access to the current notebook's source list (and
+// its id) so CitationModal / FulltextViewer / SourcesPanel can join by
+// source_id and fetch fulltext without prop drilling through ChatPane /
+// ChatTurn / MarkdownAnswer / CitationChip.
 // ---------------------------------------------------------------------------
 
-const SourcesContext = createContext<Source[]>([]);
+interface SourcesContextValue {
+  notebookId: string | null;
+  sources: Source[];
+}
+
+const SourcesContext = createContext<SourcesContextValue>({
+  notebookId: null,
+  sources: [],
+});
 
 export function SourcesProvider({
+  notebookId,
   sources,
   children,
 }: {
+  notebookId: string | null;
   sources: Source[];
   children: ReactNode;
 }) {
+  const value = useMemo<SourcesContextValue>(
+    () => ({ notebookId, sources }),
+    [notebookId, sources]
+  );
   return (
-    <SourcesContext.Provider value={sources}>{children}</SourcesContext.Provider>
+    <SourcesContext.Provider value={value}>{children}</SourcesContext.Provider>
   );
 }
 
 export function useSources(): Source[] {
-  return useContext(SourcesContext);
+  return useContext(SourcesContext).sources;
+}
+
+export function useNotebookId(): string | null {
+  return useContext(SourcesContext).notebookId;
 }
 
 export function useSourceLookup(): (source_id: string) => Source | undefined {
