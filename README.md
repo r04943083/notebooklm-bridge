@@ -14,14 +14,14 @@ live in [`plan.md`](plan.md). Project-wide rules (no AI signatures in commits,
 | Layer       | Tech                                            |
 |-------------|-------------------------------------------------|
 | Bridge HTTP | FastAPI + uvicorn (single worker)               |
-| NotebookLM  | [`notebooklm-py`](https://github.com/teng-lin/notebooklm-py) (single shared client) |
+| NotebookLM  | [`notebooklm-py`](https://github.com/teng-lin/notebooklm-py) — single re-entrant async client per process; `--workers 1` enforced (CLAUDE.md §3.1) |
 | State       | In-memory dicts + JSON file persistence (`state.json`) |
 | Frontend    | React 19 + Vite 5 + TypeScript                  |
 | Tests       | pytest + pytest-asyncio + asgi-lifespan + httpx |
 
-Backend on **:8002**, frontend on **:5175**. These are `strictPort: true` /
-`--port 8002` hard-coded — they match the project convention next to
-`E2UniScript` (5173/8000) and `cpp_rename` (5174/8001).
+Backend on **:8002**, frontend on **:5175** (`strictPort: true` /
+`--port 8002` hard-coded per CLAUDE.md §3.2 — both fail loudly on conflict
+rather than silently shifting).
 
 ## Prerequisites
 
@@ -66,7 +66,8 @@ scripts/stop-web.sh              # stop both supervisors
 
 Each service is wrapped in `scripts/_supervise.sh`, so a single crash gets
 auto-restarted; >5 crashes in 30s triggers a 30s back-off. Logs go to
-`.backend.log` and `.frontend.log` at the project root.
+`.backend.log` and `.frontend.log` at the project root (override paths with
+`BACKEND_LOG` / `FRONTEND_LOG` env vars when calling `scripts/start-web.sh`).
 
 ## Packaging & Deployment
 
@@ -122,6 +123,7 @@ All non-`/healthz` endpoints require two headers:
 | GET    | `/api/sources?notebook_id=…` | Sources inside a notebook (30s cache) |
 | POST   | `/api/chat`             | Ask a question; returns answer + citations + conversation_id |
 | POST   | `/api/chat/reset?notebook_id=…` | Start a fresh conversation for this (user, notebook) |
+| POST   | `/api/chat/select?notebook_id=…&conversation_id=…` | Resume a past conversation (used by the History popover; 204) |
 
 `POST /api/chat` body:
 
@@ -133,6 +135,10 @@ All non-`/healthz` endpoints require two headers:
   "reset": false
 }
 ```
+
+`source_ids` is optional; when provided, restricts the answer's citations to
+the listed sources (a subset of the notebook's source IDs). `null` means
+"all sources in this notebook".
 
 ## Multi-user model
 
@@ -174,7 +180,7 @@ notebooklm-bridge/
 ├── backend/                  FastAPI app, store, auth, routes
 ├── frontend/                 React 19 + Vite + TypeScript
 ├── scripts/
-│   ├── start-web / stop-web / status-web / _supervise   (dev daemon mgmt)
+│   ├── start-web.sh / stop-web.sh / status-web.sh / _supervise.sh  (dev daemon mgmt)
 │   ├── pack.sh                                          (build release tarball)
 │   ├── deploy.sh / update.sh                            (run on target host)
 │   └── README_DEPLOY.md                                 (deploy runbook)

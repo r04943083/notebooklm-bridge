@@ -96,31 +96,24 @@ export default function App() {
     loadHistory(userId)
   );
 
-  // The currently active conversation, persisted across reloads so the user
-  // doesn't have to manually re-open the history popover after refreshing.
-  // `null` means "fresh, no resumed state"; a string means "we are continuing
-  // / restoring this conversation_id". Used (a) as part of the ChatPane key
-  // so a history-restore re-mounts it cleanly with the right initial turns,
+  // The currently active conversation. `null` means "fresh, no resumed state";
+  // a string means "we are continuing / restoring this conversation_id".
+  // Intentionally NOT persisted across reloads — a refresh always gives a
+  // clean conversation box. To revisit an earlier chat the user clicks an
+  // entry in the History popover (handleSelectHistory below), which still
+  // rehydrates from `turnsKey(uid, cid)`. Used (a) as part of the ChatPane
+  // key so a history-restore re-mounts cleanly with the right initial turns,
   // and (b) when "new conversation" is clicked.
-  const [activeConversationId, setActiveConversationId] = useState<string | null>(
-    () => localStorage.getItem(activeCidKey(userId)) || null
-  );
-  const [initialTurns, setInitialTurns] = useState<ChatTurn[]>(() => {
-    const cid = localStorage.getItem(activeCidKey(userId));
-    return cid ? loadTurns(userId, cid) : [];
-  });
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [initialTurns, setInitialTurns] = useState<ChatTurn[]>([]);
 
-  // Persist active conversation_id whenever it changes, so a reload picks it
-  // back up. Empty string / null clears the key.
+  // Clean up the `nblm_active_cid:<uid>` key left over from an older build
+  // that auto-restored the last conversation on reload. Harmless if absent;
+  // removed once on mount (and again if userId changes via "switch user").
   useEffect(() => {
     if (!userId) return;
-    const key = activeCidKey(userId);
-    if (activeConversationId) {
-      localStorage.setItem(key, activeConversationId);
-    } else {
-      localStorage.removeItem(key);
-    }
-  }, [userId, activeConversationId]);
+    localStorage.removeItem(activeCidKey(userId));
+  }, [userId]);
 
   // Load notebooks list. Extracted into a callback so the retry button on the
   // error UI can call it directly. The effect below kicks it on userId changes.
