@@ -62,13 +62,24 @@ echo "[2/6] Building frontend"
 )
 
 # -- [3/6] Download offline wheels ----------------------------------------
-echo "[3/6] Downloading wheels (this can take a minute)"
+echo "[3/6] Downloading wheels (target: Python 3.11 + Linux x86_64 manylinux2014)"
 mkdir -p "$STAGE/wheels"
-# --only-binary=:none: would force sdists; we want wheels when available but
-# accept sdists for pure-python deps. Defaults are fine. We isolate dest so
-# pip's local cache lookups don't bleed in stale builds.
+# Pin the wheel set's ABI / platform / Python version explicitly. Without
+# this, pip download picks the LOCAL interpreter's tag, so packing on 3.12
+# would ship cp312 wheels (httptools / uvloop / watchfiles / pyyaml) that
+# refuse to install on a 3.11 deploy host — this is the bug v1.0.1 is
+# fixing. manylinux2014 covers glibc ≥ 2.17 (RHEL 7+ / Ubuntu 18+).
+#
+# --only-binary=:all: makes pip fail loudly if any dep lacks a matching
+# wheel, instead of falling back to an sdist that the deploy host (offline
+# and likely without gcc) can't compile.
 python3 -m pip download \
     --dest "$STAGE/wheels" \
+    --python-version 3.11 \
+    --platform manylinux2014_x86_64 \
+    --implementation cp \
+    --abi cp311 \
+    --only-binary=:all: \
     --requirement requirements-runtime.txt
 
 # -- [4/6] Stage sources ---------------------------------------------------

@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] — 2026-05-19
+
+v1.0.0 部署到 IT 那边的 Python 3.11 主机时报 "No matching distribution
+found for httptools" — patch release 修这个打包 bug。v1.0.0 tarball 受
+影响,部署前换成 v1.0.1。
+
+### Fixed
+
+- **`scripts/pack.sh`** — `pip download` 现在显式锁定 `--python-version 3.11
+  --platform manylinux2014_x86_64 --implementation cp --abi cp311
+  --only-binary=:all:`。之前不指定这几个参数,pip 默认拉本机解释器
+  (3.12)的 wheel,产出 `cp312-cp312` 标签的 `httptools` / `uvloop` /
+  `watchfiles` / `pyyaml`,3.11 解释器拒绝加载这些 ABI 不匹配的 wheel。
+  `--only-binary=:all:` 让缺 wheel 立即报错,避免 fallback 到目标机
+  无法 compile 的 sdist。
+- 锁定平台后,打包机本地是 Python 3.12 还是 3.11 都不影响产物 —— wheel
+  set 始终是 cp311 + manylinux2014_x86_64。
+
 ## [1.0.0] — 2026-05-19
 
 第一个对内可用的版本。一台 Bridge 主机把单个 Google 账号的 NotebookLM
