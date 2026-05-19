@@ -5,6 +5,59 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] — 2026-05-19
+
+Deployment ergonomics: IT operators can now sign in to NotebookLM with
+their own Google account via a single script on the deploy host, with no
+manual cookie copying between machines.
+
+### Added
+
+- **`scripts/login.sh`** — IT-facing one-shot cookies setup / refresh
+  script. Verifies the `.venv` from `deploy.sh`, auto-installs Playwright
+  Chromium's missing system libs (with a sudo prompt), pops a real Chromium
+  window via `notebooklm login`, writes `./secrets/auth.json` (mode 0600),
+  and smoke-tests by listing notebooks. Re-runnable any time
+  `/api/healthz` reports `auth_valid=false`; supports `--refresh` to force
+  re-login, `--profile NAME` for multi-account setups, `--yes` for
+  non-interactive use.
+- `scripts/deploy.sh` now auto-generates `INTERNAL_AUTH_SHARED_SECRET` into
+  `.env` instead of asking the operator to `openssl rand -hex 32` manually.
+- `requirements-runtime.txt` now pulls `notebooklm-py[browser,cookies]` so
+  the offline `wheels/` set includes Playwright — `scripts/login.sh` works
+  on the deploy host without needing PyPI access (though Playwright still
+  downloads Chromium binary itself from `cdn.playwright.dev` the first
+  time, see Notes).
+- `scripts/pack.sh` packs `scripts/login.sh` into the release tarball.
+
+### Changed
+
+- **`README.md`** — "Quick start" rewritten as a 4-step recipe for IT
+  operators (unpack → `deploy.sh` → `login.sh` → `start-web.sh`). The
+  previous developer-oriented quick start moved to a new "Developer setup"
+  section, clearly labelled as for project contributors, not deployers.
+- **`docs/cookie-refresh-runbook.md`** — rewritten. Standard recovery path
+  is now "re-run `bash scripts/login.sh` on the deploy host", RTO 5
+  minutes. The old "sign in on a workstation + scp the auth.json over"
+  path is documented as a fallback for headless / air-gapped servers,
+  alongside a new appendix on X11 forwarding (cookies minted from the
+  bridge's own egress IP).
+- `scripts/deploy.sh` next-steps prompt now points to `scripts/login.sh`
+  instead of "scp `auth.json` from another host".
+
+### Notes
+
+- The deploy host must have a desktop environment and outbound internet to
+  `cdn.playwright.dev` for the first `scripts/login.sh` to download
+  Chromium (~150MB, cached forever after). Headless / air-gapped hosts
+  follow the runbook's fallback workflow.
+- The release tarball is larger now (~11MB → ~40MB) because the offline
+  wheel set bundles Playwright + browser_cookie3.
+- `secrets/auth.json` is now minted **on the deploy host** by the IT
+  operator's own Google account, instead of being copied from the
+  developer's workstation. This is a workflow change, not a code-API
+  change — the file format and bridge behaviour are identical.
+
 ## [1.0.1] — 2026-05-19
 
 v1.0.0 部署到 IT 那边的 Python 3.11 主机时报 "No matching distribution

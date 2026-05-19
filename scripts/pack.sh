@@ -106,7 +106,7 @@ cp -r frontend/public "$STAGE/frontend/public" 2>/dev/null || true
 
 # Scripts (start-web / stop-web / status-web / _supervise / setup).
 mkdir -p "$STAGE/scripts"
-for f in scripts/start-web.sh scripts/stop-web.sh scripts/status-web.sh scripts/_supervise.sh scripts/setup.sh; do
+for f in scripts/start-web.sh scripts/stop-web.sh scripts/status-web.sh scripts/_supervise.sh scripts/setup.sh scripts/login.sh; do
     if [ -f "$f" ]; then
         cp "$f" "$STAGE/scripts/"
     fi

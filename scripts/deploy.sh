@@ -56,7 +56,8 @@ fi
 echo "→ Installing backend from wheels/ (offline)"
 .venv/bin/pip install --quiet --upgrade pip
 .venv/bin/pip install --quiet --no-index --find-links wheels/ \
-    fastapi 'uvicorn[standard]' pydantic pydantic-settings httpx notebooklm-py
+    fastapi 'uvicorn[standard]' pydantic pydantic-settings httpx \
+    'notebooklm-py[browser,cookies]'
 echo "→ Installing notebooklm-bridge package itself"
 .venv/bin/pip install --quiet --no-build-isolation --no-deps -e .
 echo "✓ Backend installed"
@@ -65,40 +66,55 @@ echo "✓ Backend installed"
 mkdir -p secrets
 chmod 700 secrets
 
-# -- .env -----------------------------------------------------------------
+# -- .env (auto-generate INTERNAL_AUTH_SHARED_SECRET) --------------------
 if [ ! -f .env ]; then
     cp .env.example .env
-    echo ""
-    echo "⚠ .env was created from .env.example."
-    echo "  Generate a secret and paste it into .env at INTERNAL_AUTH_SHARED_SECRET:"
-    echo "      openssl rand -hex 32"
+    echo "→ Created .env from .env.example"
+fi
+
+# If the secret is still the placeholder, generate one. IT used to be told
+# "go run openssl rand -hex 32 yourself", which was easy to miss.
+if grep -q "<32B random" .env; then
+    if command -v openssl >/dev/null 2>&1; then
+        SECRET=$(openssl rand -hex 32)
+        # Both GNU and BSD sed: write to a tmp file and mv to be portable.
+        sed "s|<32B random — replace this placeholder>|$SECRET|" .env > .env.tmp \
+            && mv .env.tmp .env
+        echo "✓ Generated INTERNAL_AUTH_SHARED_SECRET (32 random bytes) in .env"
+    else
+        echo "⚠ openssl not found — please paste a 32-byte hex value into .env yourself:"
+        echo "    INTERNAL_AUTH_SHARED_SECRET=<your value>"
+    fi
 else
-    echo "✓ .env already exists, leaving it alone"
+    echo "✓ .env already has INTERNAL_AUTH_SHARED_SECRET set, leaving it alone"
 fi
 
 # -- secrets/auth.json check ---------------------------------------------
 if [ ! -f secrets/auth.json ]; then
-    cat <<EOF
-
-⚠ secrets/auth.json is missing.
-  Copy it over from a host that has completed Phase 1, then:
-      chmod 600 secrets/auth.json
-EOF
+    echo ""
+    echo "⚠ secrets/auth.json is missing. The next step (bash scripts/login.sh)"
+    echo "  will sign you in to NotebookLM and create it."
 else
     chmod 600 secrets/auth.json
     echo "✓ secrets/auth.json present (mode 600)"
 fi
 
-cat <<EOF
+cat <<'EOF'
 
 ============================================================
 ✓ Install complete. Next:
-  1. Make sure .env has INTERNAL_AUTH_SHARED_SECRET set.
-  2. Make sure secrets/auth.json is in place (chmod 600).
-  3. Start the bridge:
+
+  1. Sign in to NotebookLM with your Google account:
+       bash scripts/login.sh
+     (This pops a Chromium window; sign in, open your target notebook
+      once, then close the browser.)
+
+  2. Start the bridge:
        bash scripts/start-web.sh          # binds 0.0.0.0 (LAN)
        bash scripts/start-web.sh --local  # binds 127.0.0.1 only
-  4. Verify:
-       curl -fsS http://localhost:8002/api/healthz
+
+  3. Verify:
+       curl -s http://localhost:8002/api/healthz | jq
+       # Expect: auth_valid=true
 ============================================================
 EOF

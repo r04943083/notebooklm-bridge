@@ -10,7 +10,7 @@ the bridge talks to `notebooklm.google.com` from a host that *can* reach
 Google. A Feishu (Lark) bot adapter is planned as Phase 3 and is **not** part
 of v1.0.
 
-**Status: v1.0.0** — first internal-ready release. See
+**Status: v1.0.2** — first internal-ready release. See
 [`CHANGELOG.md`](CHANGELOG.md). Project-wide engineering rules (no AI
 signatures in commits, `--workers 1` lock, port pinning, etc.) live in
 [`CLAUDE.md`](CLAUDE.md); the design rationale lives in [`plan.md`](plan.md).
@@ -23,11 +23,12 @@ signatures in commits, `--workers 1` lock, port pinning, etc.) live in
 - [Architecture](#architecture)
 - [Tech stack](#tech-stack)
 - [Features](#features)
-- [Quick start (development)](#quick-start-development)
-- [Production deployment](#production-deployment)
+- [Quick start (IT operator)](#quick-start-it-operator)
+- [Production deployment notes](#production-deployment-notes)
 - [Configuration](#configuration)
 - [API reference](#api-reference)
 - [Operations](#operations)
+- [Developer setup](#developer-setup)
 - [Testing](#testing)
 - [Project layout](#project-layout)
 - [Roadmap](#roadmap)
@@ -182,52 +183,76 @@ rather than silently shifting to the next port).
 
 ---
 
-## Quick start (development)
+## Quick start (IT operator)
 
-Prerequisites: Python ≥ 3.11, Node ≥ 18, npm. Bridge host must reach
-`https://notebooklm.google.com`.
+**TL;DR — four shell commands on the deploy host.** Required: Linux with
+a desktop environment (GNOME / KDE / XFCE / …), outbound access to
+`google.com` and `cdn.playwright.dev`, Python ≥ 3.11, Node ≥ 18.
 
 ```bash
-# 1. Backend (dev install, no notebooklm-py yet)
-pip install -e '.[dev]'
+# 1. Unpack the release tarball
+tar -xzf notebooklm-bridge-v1.0.2.tar.gz
+cd notebooklm-bridge-v1.0.2
 
-# 2. Frontend
-cd frontend && npm install && cd ..
+# 2. Install everything offline + auto-generate INTERNAL_AUTH_SHARED_SECRET
+bash deploy.sh
 
-# 3. Env file
-cp .env.example .env
-# Then paste a fresh secret into INTERNAL_AUTH_SHARED_SECRET:
-openssl rand -hex 32
+# 3. Sign in to NotebookLM with YOUR Google account
+#    (pops a real Chromium window — sign in, open the target notebook once,
+#     then close the browser)
+bash scripts/login.sh
 
-# 4. Pin and install notebooklm-py (after the Phase-1 verification in
-#    docs/notebooklm-py-integration.md picks a working release)
-pip install -e '.[runtime]'
-
-# 5. Drop cookies in place
-chmod 0600 secrets/auth.json
+# 4. Start the bridge
+bash scripts/start-web.sh
 ```
 
-### Run
+Verify:
 
 ```bash
-scripts/start-web.sh             # 0.0.0.0 — LAN-reachable
-scripts/start-web.sh --local     # 127.0.0.1 only
-scripts/start-web.sh --force     # kill stale pid file from THIS project
+curl -s http://localhost:8002/api/healthz | jq
+# Expect: { "auth_valid": true, "inflight_asks": 0, "circuit_open": false, ... }
+```
 
-scripts/status-web.sh            # supervisor health + port owner + log tail
-scripts/stop-web.sh              # stop both supervisors
+Then open `http://<deploy-host>:5175` in a LAN browser.
+
+### When cookies expire
+
+`/api/healthz` will start returning `auth_valid=false` (typically after
+1–2 weeks). Re-run step 3 and restart:
+
+```bash
+bash scripts/login.sh
+bash scripts/stop-web.sh && bash scripts/start-web.sh
+```
+
+That's the whole loop — no shuffling of cookie files between machines.
+
+### What if the deploy host is headless / can't reach `cdn.playwright.dev`?
+
+`scripts/login.sh` needs a desktop to pop the Chromium window, and the
+first run downloads Chromium (~150MB) from `cdn.playwright.dev`. If
+either is unavailable, see [`docs/cookie-refresh-runbook.md`](docs/cookie-refresh-runbook.md)
+for the two-machine fallback (sign in on a laptop, `scp` the
+`secrets/auth.json` over).
+
+### Daily ops
+
+```bash
+bash scripts/start-web.sh            # 0.0.0.0 — LAN-reachable
+bash scripts/start-web.sh --local    # 127.0.0.1 only
+bash scripts/start-web.sh --force    # kill stale pid file from THIS project
+
+bash scripts/status-web.sh           # supervisor health + port owner + log tail
+bash scripts/stop-web.sh             # stop both supervisors
 ```
 
 Each service runs under `scripts/_supervise.sh`. Logs default to
 `.backend.log` / `.frontend.log` in the project root; override paths via
 `BACKEND_LOG` / `FRONTEND_LOG` env vars.
 
-Open `http://localhost:5175`, enter an internal name or employee ID, pick a
-notebook, and ask a question.
-
 ---
 
-## Production deployment
+## Production deployment notes
 
 ### Topology
 
@@ -248,59 +273,31 @@ flowchart TB
     BH -. HTTPS + cookies .-> G
 ```
 
-### Step 1 — Build a release tarball on the dev / packaging host
+### Building a release tarball (on the dev / packaging host)
 
 ```bash
 scripts/pack.sh
-# → dist/notebooklm-bridge-v1.0.0.tar.gz  (+ .sha256 sidecar)
+# → dist/notebooklm-bridge-v1.0.2.tar.gz  (+ .sha256 sidecar)
 ```
 
 The tarball bundles: backend `.py` sources, the pre-built frontend `dist/`,
-offline pip `wheels/`, the dev scripts, and a `deploy.sh` / `update.sh` /
-`README_DEPLOY.md` for the target host. It does **not** bundle `secrets/`,
-`.env`, or `state.json` — those are operator responsibilities (see Step 4).
+offline pip `wheels/` (cp311 / manylinux2014_x86_64 only — see `pack.sh`),
+the daemon scripts, `scripts/login.sh`, and `deploy.sh` / `update.sh` /
+`README_DEPLOY.md` for the target host.
 
-### Step 2 — Transfer to the bridge host
+It does **not** bundle `secrets/`, `.env`, or `state.json` — credentials
+are minted on the target host by `scripts/login.sh` (and the shared
+secret is auto-generated by `deploy.sh`).
 
-```bash
-scp dist/notebooklm-bridge-v1.0.0.tar.gz user@bridge-host:~/
-scp dist/notebooklm-bridge-v1.0.0.tar.gz.sha256 user@bridge-host:~/
-ssh user@bridge-host 'sha256sum -c notebooklm-bridge-v1.0.0.tar.gz.sha256'
-```
-
-### Step 3 — Install on the bridge host
+### Transferring to the bridge host
 
 ```bash
-tar -xzf notebooklm-bridge-v1.0.0.tar.gz
-cd notebooklm-bridge-v1.0.0
-bash deploy.sh
-# Creates .venv, installs deps offline from wheels/, generates .env from template
+scp dist/notebooklm-bridge-v1.0.2.tar.gz user@bridge-host:~/
+scp dist/notebooklm-bridge-v1.0.2.tar.gz.sha256 user@bridge-host:~/
+ssh user@bridge-host 'sha256sum -c notebooklm-bridge-v1.0.2.tar.gz.sha256'
 ```
 
-### Step 4 — Drop in credentials
-
-```bash
-# Copy a working auth.json from a host that has done the notebooklm-py
-# Chrome cookies export. (See docs/cookie-refresh-runbook.md.)
-scp old-host:~/notebooklm-bridge/secrets/auth.json secrets/auth.json
-chmod 0600 secrets/auth.json
-
-# Fill in INTERNAL_AUTH_SHARED_SECRET in .env with a fresh 32-byte secret.
-# The same value is consumed by the frontend bundle via Vite's
-# VITE_SHARED_SECRET — rebuild the frontend on the bridge host if you
-# change it.
-openssl rand -hex 32   # paste into .env
-```
-
-### Step 5 — Start and verify
-
-```bash
-bash scripts/start-web.sh
-curl -s http://localhost:8002/api/healthz | jq
-# → { "auth_valid": true, "inflight_asks": 0, "circuit_open": false, ... }
-
-# Then open http://<bridge-host>:5175 from a LAN browser.
-```
+Then follow the four-step "Quick start" above on the bridge host.
 
 ### Upgrading an existing install
 
@@ -310,6 +307,10 @@ cd notebooklm-bridge-vNEW
 bash update.sh /path/to/old/install   # reuses .venv / .env / secrets
 bash scripts/start-web.sh
 ```
+
+`update.sh` carries over `.venv`, `.env`, and `secrets/auth.json` so you
+don't have to re-login or regenerate the shared secret. `state.json` is
+preserved too — sessions survive the upgrade.
 
 `update.sh` carries over `.venv`, `.env`, and `secrets/` from the old
 install so credentials don't have to be re-placed; `state.json` is also
@@ -411,6 +412,54 @@ paths via `BACKEND_LOG` and `FRONTEND_LOG` env vars before calling
 - Cookies expired / `auth_valid=false`: [`docs/cookie-refresh-runbook.md`](docs/cookie-refresh-runbook.md)
 - Unexpected upstream errors / breaker won't close: [`docs/upstream-breakage-runbook.md`](docs/upstream-breakage-runbook.md)
 - Port in use: `scripts/start-web.sh --force` (only kills if cwd matches this project)
+
+---
+
+## Developer setup
+
+This section is for working on the project itself (writing backend / frontend
+code, running tests, iterating). **IT operators should follow "Quick start
+(IT operator)" above instead** — it skips the steps that only make sense in
+a development checkout.
+
+```bash
+# 1. Backend deps (test + lint + type-check tooling)
+pip install -e '.[dev]'
+
+# 2. Frontend deps
+cd frontend && npm install && cd ..
+
+# 3. Env file
+cp .env.example .env
+# Either run scripts/setup.sh (interactive — does notebooklm login, pins
+# pyproject, mirrors the secret to frontend/.env.local, smoke-tests) or
+# fill .env yourself:
+openssl rand -hex 32   # paste into INTERNAL_AUTH_SHARED_SECRET
+
+# 4. Install notebooklm-py at the pinned version
+pip install -e '.[runtime]'
+# (scripts/setup.sh also pins this for you. Without notebooklm-py installed
+#  the bridge runs in degraded mode — chat returns 503 but everything else
+#  still works, which is useful for frontend-only iteration.)
+
+# 5. Sign in to NotebookLM (writes ~/.notebooklm/profiles/default/storage_state.json
+#    AND copies it into ./secrets/auth.json with chmod 600)
+bash scripts/setup.sh
+# or just the cookies portion:
+notebooklm login
+cp ~/.notebooklm/profiles/default/storage_state.json secrets/auth.json
+chmod 0600 secrets/auth.json
+```
+
+Then run the dev servers the same way IT does:
+
+```bash
+bash scripts/start-web.sh
+```
+
+`scripts/setup.sh` is intentionally chunky — it's the one-shot bootstrap for
+a fresh checkout. Once it's been run once, day-to-day dev only needs
+`start-web.sh` / `stop-web.sh` / `pytest` / `npm run build`.
 
 ---
 
