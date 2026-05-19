@@ -104,12 +104,10 @@ notebooklm-py 的 `NotebookLMClient` 是 "single event loop async re-entrant, no
 ## 6. 项目状态(随阶段更新)
 
 - [x] Phase 0 — 设计:`plan.md` 完成
-- [ ] Phase 1 — CLI 打通(网络 + cookies 验证)
-- [ ] Phase 2 — Bridge + 多人前端
+- [x] Phase 1 — CLI 打通(网络 + cookies 验证)
+- [x] Phase 2 — Bridge + 多人前端(v1.0.0)
 - [ ] Phase 3 — 飞书 Bot
 - [ ] Phase 4 — Studio(暂搁置)
-
-进入 Phase 2 之前,Phase 1 的 DoD 全部 check 完。
 
 ---
 

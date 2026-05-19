@@ -6,7 +6,10 @@ import { AppShell } from "@/components/AppShell";
 import { ChatPane } from "@/components/ChatPane";
 import { CitationDrawer } from "@/components/CitationDrawer";
 import { SourcesPanel } from "@/components/SourcesPanel";
-import { StudioStub } from "@/components/StudioStub";
+// StudioStub is kept in the repo (frontend/src/components/StudioStub.tsx) but
+// intentionally not imported in v1.0 — see the studio={null} prop below and
+// CLAUDE.md §6 (Phase 4 still off the roadmap). Re-import here when Phase 4
+// lands; AppShell already supports the prop.
 import { TopBar } from "@/components/TopBar";
 import { UserPrompt } from "@/components/UserPrompt";
 import { Button } from "@/components/ui/button";
@@ -361,7 +364,11 @@ export default function App() {
                     notebookTitle={selectedNotebook?.title}
                   />
                 }
-                studio={<StudioStub />}
+                /* Phase 4 (Studio: Audio Overview / Mind map) is not in the
+                 * v1.0 roadmap, so omit the prop entirely — AppShell auto-collapses
+                 * back to a two-column grid. The StudioStub component is kept on
+                 * disk to make re-enabling trivial when Phase 4 lands. */
+                studio={null}
               >
                 {notebookId ? (
                   <ChatPane
