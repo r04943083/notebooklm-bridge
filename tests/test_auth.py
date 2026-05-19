@@ -1,5 +1,8 @@
 """Header-based auth dependency tests. Exercises every reject branch in
 ``backend.auth.require_internal_user``.
+
+The X-Shared-Secret header check was removed in v1.0.3 — see backend/auth.py
+for the rationale. The only remaining authn surface is X-User-Id validation.
 """
 
 from __future__ import annotations
@@ -16,27 +19,18 @@ async def test_valid_request_passes(client: AsyncClient) -> None:
 
 
 async def test_missing_user_id_returns_422(client: AsyncClient) -> None:
-    # Drop the X-Shared-Secret too so we don't half-authenticate
     resp = await client.get("/api/notebooks", headers={})
     assert resp.status_code in (401, 422)  # FastAPI returns 422 for missing Header
 
 
-async def test_missing_shared_secret_returns_422(client: AsyncClient) -> None:
-    # The shared secret is set in the fixture; override with empty
+async def test_extra_shared_secret_header_is_ignored(client: AsyncClient) -> None:
+    """Legacy clients (browsers loading a pre-v1.0.3 bundle) may still send
+    X-Shared-Secret. The backend must ignore it, not reject the request."""
     resp = await client.get(
         "/api/notebooks",
-        headers={"X-User-Id": "alice", "X-Shared-Secret": ""},
+        headers={"X-User-Id": "alice", "X-Shared-Secret": "anything-here"},
     )
-    # Either constant-time comparison rejects (401), or missing → 422
-    assert resp.status_code in (401, 422)
-
-
-async def test_wrong_shared_secret_returns_401(client: AsyncClient) -> None:
-    resp = await client.get(
-        "/api/notebooks",
-        headers={"X-User-Id": "alice", "X-Shared-Secret": "wrong-secret"},
-    )
-    assert resp.status_code == 401
+    assert resp.status_code == 200
 
 
 @pytest.mark.parametrize(
@@ -56,7 +50,6 @@ async def test_invalid_user_id_returns_400(client: AsyncClient, user_id: str) ->
 
 async def test_healthz_does_not_require_auth(client: AsyncClient) -> None:
     """Health endpoint is unauthenticated by design (runbooks need it)."""
-    # Use a fresh client without the shared secret to confirm.
     transport = client._transport  # type: ignore[attr-defined]
     async with AsyncClient(transport=transport, base_url="http://test") as anon:  # type: ignore[arg-type]
         resp = await anon.get("/api/healthz")

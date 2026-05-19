@@ -23,8 +23,6 @@ from httpx import ASGITransport, AsyncClient
 
 from backend.config import get_settings
 
-SHARED_SECRET = "test-secret-32-bytes-xxxxxxxxxxx"
-
 
 @pytest.fixture
 def state_path(tmp_path: Path) -> Path:
@@ -36,7 +34,6 @@ def settings(monkeypatch: pytest.MonkeyPatch, state_path: Path) -> Any:
     """Reset Settings cache and inject test-safe env values for every test."""
     monkeypatch.setenv("NOTEBOOKLM_AUTH_JSON", "/dev/null")
     monkeypatch.setenv("STATE_JSON", str(state_path))
-    monkeypatch.setenv("INTERNAL_AUTH_SHARED_SECRET", SHARED_SECRET)
     monkeypatch.setenv("INTERNAL_FRONTEND_ORIGIN", "http://test")
     monkeypatch.setenv("BACKEND_PORT", "8002")
     monkeypatch.setenv("MAX_INFLIGHT_ASKS", "8")
@@ -208,7 +205,6 @@ async def client(app_with_fake_client: Any) -> AsyncIterator[AsyncClient]:
     async with AsyncClient(
         transport=transport,
         base_url="http://test",
-        headers={"X-Shared-Secret": SHARED_SECRET},
     ) as c:
         yield c
 

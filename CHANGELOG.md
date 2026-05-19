@@ -5,6 +5,67 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.3] — 2026-05-19
+
+Drops the `X-Shared-Secret` header that v1.0.2 still required. The
+deployment pattern shipped in v1.0.2 (operator runs `deploy.sh` which
+auto-generates a fresh `INTERNAL_AUTH_SHARED_SECRET`) was fundamentally
+broken: the frontend bundle is prebuilt on the developer's host with the
+developer's secret baked in, so the deploy host's new secret never
+matched what the browser sent — every UI API call returned 401.
+
+The LAN is already the trust boundary, so the shared-secret check was
+security theatre that introduced a real cross-host coupling bug. v1.0.3
+removes it entirely.
+
+### Removed
+
+- **`X-Shared-Secret` header check** in `backend/auth.py`. Only
+  `X-User-Id` is authenticated now.
+- `internal_auth_shared_secret` field in `backend/config.py`. Legacy
+  `.env` files with this line are ignored (pydantic-settings has
+  `extra="ignore"`).
+- `X-Shared-Secret` from CORS `allow_headers` in `backend/app.py`.
+- `VITE_SHARED_SECRET` consumption in `frontend/src/api.ts` and the
+  associated `frontend/.env.local` mirroring in `scripts/setup.sh`.
+- Auto-generation of `INTERNAL_AUTH_SHARED_SECRET` in `scripts/deploy.sh`
+  (the workflow it enabled was the bug).
+
+### Changed
+
+- **`tests/test_auth.py`** — removed the two tests that exercised
+  shared-secret rejection, added one test (`test_extra_shared_secret_header_is_ignored`)
+  that confirms legacy clients still sending the header don't get rejected.
+- **`tests/conftest.py`** — `SHARED_SECRET` constant + monkeypatch
+  + request-level header removed. 4 test files updated to follow.
+- **`scripts/setup.sh`** — collapsed from 8 steps to 7 (the
+  `frontend/.env.local` mirror step is gone).
+- **`scripts/README_DEPLOY.md`** — rewritten. IT deploy is now 4
+  commands: `tar -xzf` → `deploy.sh` → `scripts/login.sh` →
+  `scripts/start-web.sh`. No more "paste this secret into .env".
+- **`.env.example`** — `INTERNAL_AUTH_SHARED_SECRET` line removed (with
+  a comment explaining the version-skew migration path).
+- **`README.md`** — Mermaid diagram, env-vars table, API-headers table,
+  Configuration and Developer-setup sections all updated. The behaviour
+  table now says one header (`X-User-Id`), not two.
+- **`CLAUDE.md` §3.6** — rewritten to reflect that `INTERNAL_AUTH_SHARED_SECRET`
+  is deprecated.
+
+### Migration
+
+For IT operators upgrading v1.0.2 → v1.0.3:
+
+```bash
+tar -xzf notebooklm-bridge-v1.0.3.tar.gz
+cd notebooklm-bridge-v1.0.3
+bash update.sh /path/to/notebooklm-bridge-v1.0.2
+bash scripts/stop-web.sh && bash scripts/start-web.sh
+```
+
+The leftover `INTERNAL_AUTH_SHARED_SECRET=...` line in the old `.env`
+is harmless and can be left alone. No browser bookmark changes; the UI
+just stops sending the header automatically once the new bundle loads.
+
 ## [1.0.2] — 2026-05-19
 
 Deployment ergonomics: IT operators can now sign in to NotebookLM with

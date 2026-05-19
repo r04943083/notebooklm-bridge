@@ -8,10 +8,8 @@ from typing import Any
 
 from httpx import AsyncClient
 
-from .conftest import SHARED_SECRET
-
 SELECT_URL = "/api/chat/select"
-HDR = {"X-User-Id": "alice", "X-Shared-Secret": SHARED_SECRET}
+HDR = {"X-User-Id": "alice"}
 
 
 async def test_happy_path_writes_to_store(
@@ -59,12 +57,12 @@ async def test_each_user_has_isolated_session(
 
     await client.post(
         SELECT_URL,
-        headers={"X-User-Id": "alice", "X-Shared-Secret": SHARED_SECRET},
+        headers={"X-User-Id": "alice"},
         params={"notebook_id": "nb-1", "conversation_id": "alice-cid"},
     )
     await client.post(
         SELECT_URL,
-        headers={"X-User-Id": "bob", "X-Shared-Secret": SHARED_SECRET},
+        headers={"X-User-Id": "bob"},
         params={"notebook_id": "nb-1", "conversation_id": "bob-cid"},
     )
 

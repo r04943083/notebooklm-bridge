@@ -1,26 +1,29 @@
 """Request authentication for the internal HTTP API.
 
-Two headers gate every non-public endpoint:
+A single header gates every non-public endpoint:
 
-  * ``X-Shared-Secret`` — a fixed string baked into the frontend bundle. Constant-time
-    compared with the value in settings (defence-in-depth: even inside the trust
-    boundary, never use plain ``==`` for secret comparison).
-  * ``X-User-Id``       — free-form internal identifier (name / 工号). Becomes the
+  * ``X-User-Id`` — free-form internal identifier (name / 工号). Becomes the
     isolation key for sessions + rate limiting.
 
 The ``X-User-Id`` validation rules are deliberately strict — the value is used as
 part of the JSON storage key in :mod:`backend.store` (``"<user>|<notebook>"``),
 so anything that breaks that encoding or sneaks in HTTP-header injection is rejected.
+
+Up to v1.0.2 we also required an ``X-Shared-Secret`` header constant-time-
+compared against a value in ``.env``. That broke v1.0.2's offline-deploy
+flow: the secret has to live inside the frontend bundle, which is
+pre-built on the developer's host with the developer's secret — and never
+matches the secret the deploy host's ``deploy.sh`` auto-generates. The
+LAN is already a trust boundary; the shared-secret check was security
+theatre that introduced a real cross-host coupling bug, so it was
+removed in v1.0.3.
 """
 
 from __future__ import annotations
 
-import hmac
 from typing import Annotated
 
-from fastapi import Depends, Header, HTTPException, status
-
-from .config import Settings, get_settings
+from fastapi import Header, HTTPException, status
 
 _MAX_USER_ID_LEN = 64
 _FORBIDDEN_USER_ID_CHARS = ("|", "\r", "\n", "\t", "\x00")
@@ -28,13 +31,8 @@ _FORBIDDEN_USER_ID_CHARS = ("|", "\r", "\n", "\t", "\x00")
 
 async def require_internal_user(
     x_user_id: Annotated[str, Header(alias="X-User-Id")],
-    x_shared_secret: Annotated[str, Header(alias="X-Shared-Secret")],
-    settings: Annotated[Settings, Depends(get_settings)],
 ) -> str:
-    """Validate headers and return the canonical ``user_id`` for use downstream."""
-    if not hmac.compare_digest(x_shared_secret, settings.internal_auth_shared_secret):
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="无效凭证")
-
+    """Validate the X-User-Id header and return the canonical ``user_id``."""
     uid = x_user_id.strip()
     if not uid:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="无效 X-User-Id (empty)")

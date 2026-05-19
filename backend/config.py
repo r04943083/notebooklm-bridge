@@ -25,8 +25,10 @@ class Settings(BaseSettings):
     internal_frontend_origin: str = Field(alias="INTERNAL_FRONTEND_ORIGIN")
 
     # --- Auth ---
-    # No default — startup MUST fail if the operator forgot to set this.
-    internal_auth_shared_secret: str = Field(alias="INTERNAL_AUTH_SHARED_SECRET")
+    # X-User-Id is the only header we authenticate against now; see
+    # backend/auth.py for the rationale on dropping X-Shared-Secret in v1.0.3.
+    # A legacy INTERNAL_AUTH_SHARED_SECRET= line in .env is ignored harmlessly
+    # because SettingsConfigDict has extra="ignore" below.
 
     # --- Behaviour ---
     notebooklm_keepalive_seconds: int = Field(default=1800, alias="NOTEBOOKLM_KEEPALIVE_SECONDS")

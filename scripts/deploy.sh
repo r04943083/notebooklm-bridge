@@ -10,9 +10,8 @@
 #   5. Print next steps (drop in secrets/auth.json, then bash scripts/start-web.sh).
 #
 # What this does NOT do — by design:
-#   * Generate INTERNAL_AUTH_SHARED_SECRET for you (operator pastes the value)
-#   * Copy secrets/auth.json (operator brings cookies from Phase 1 host)
-#   * Start the service (operator runs start-web.sh after secrets are in place)
+#   * Mint Google cookies (scripts/login.sh does that — see "Next steps" below)
+#   * Start the service (operator runs scripts/start-web.sh after login.sh)
 
 set -euo pipefail
 
@@ -26,11 +25,8 @@ cat <<'EOF'
 Required on this host:
   - Python 3.11+
   - Node 18+              (only for serving the prebuilt frontend)
-  - Ability to reach https://notebooklm.google.com from this host
-
-You will need:
-  - secrets/auth.json     Google cookies from your Phase 1 host
-  - .env with INTERNAL_AUTH_SHARED_SECRET = $(openssl rand -hex 32)
+  - Desktop environment + ability to reach https://notebooklm.google.com
+    and https://cdn.playwright.dev (for scripts/login.sh later)
 ============================================================
 EOF
 
@@ -66,27 +62,15 @@ echo "✓ Backend installed"
 mkdir -p secrets
 chmod 700 secrets
 
-# -- .env (auto-generate INTERNAL_AUTH_SHARED_SECRET) --------------------
+# -- .env -----------------------------------------------------------------
+# v1.0.3 removed the shared-secret authentication, so .env no longer needs
+# operator-supplied credentials. We still copy the template in case the
+# operator wants to tweak the rate-limit / circuit-breaker knobs.
 if [ ! -f .env ]; then
     cp .env.example .env
     echo "→ Created .env from .env.example"
-fi
-
-# If the secret is still the placeholder, generate one. IT used to be told
-# "go run openssl rand -hex 32 yourself", which was easy to miss.
-if grep -q "<32B random" .env; then
-    if command -v openssl >/dev/null 2>&1; then
-        SECRET=$(openssl rand -hex 32)
-        # Both GNU and BSD sed: write to a tmp file and mv to be portable.
-        sed "s|<32B random — replace this placeholder>|$SECRET|" .env > .env.tmp \
-            && mv .env.tmp .env
-        echo "✓ Generated INTERNAL_AUTH_SHARED_SECRET (32 random bytes) in .env"
-    else
-        echo "⚠ openssl not found — please paste a 32-byte hex value into .env yourself:"
-        echo "    INTERNAL_AUTH_SHARED_SECRET=<your value>"
-    fi
 else
-    echo "✓ .env already has INTERNAL_AUTH_SHARED_SECRET set, leaving it alone"
+    echo "✓ .env already exists, leaving it alone"
 fi
 
 # -- secrets/auth.json check ---------------------------------------------

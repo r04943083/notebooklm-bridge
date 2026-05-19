@@ -118,7 +118,7 @@ def create_app() -> FastAPI:
         allow_origins=[cfg.internal_frontend_origin],
         allow_credentials=False,
         allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["Content-Type", "X-User-Id", "X-Shared-Secret"],
+        allow_headers=["Content-Type", "X-User-Id"],
     )
 
     application.include_router(health_route.router, prefix="/api")

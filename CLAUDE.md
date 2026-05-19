@@ -72,10 +72,11 @@ notebooklm-py 的 `NotebookLMClient` 是 "single event loop async re-entrant, no
 ### 3.5 状态写入必须经 `Store` 单例
 不允许在路由里直接读写全局 dict / 文件。所有 sessions / 限流 / 熔断状态走 `app.state.store` 的方法。
 
-### 3.6 cookies / 共享口令文件
+### 3.6 cookies
 - `secrets/auth.json` 文件权限 `0600`,owner 才能读
-- `INTERNAL_AUTH_SHARED_SECRET` 不入仓 — 只在 `.env`(已 `.gitignore`)
-- `.env.example` 用占位符 `<32B 随机>`,不放真值
+- `INTERNAL_AUTH_SHARED_SECRET` 在 v1.0.3 起已废弃 — bundle-baked secret 跟
+  deploy 机 auto-gen 出来的值必然错位会让浏览器整套 API 401,不修反而靠
+  谱(LAN 已经是 trust boundary,X-User-Id 单 header 验证就够)
 
 ---
 

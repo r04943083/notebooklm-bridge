@@ -12,18 +12,17 @@ from typing import Any
 from httpx import ASGITransport, AsyncClient
 
 from .conftest import (
-    SHARED_SECRET,
     FakeClient,
     FakeRateLimited,
     FakeUpstreamError,
 )
 
 CHAT = "/api/chat"
-ANSWER_HEADER_OK = {"X-User-Id": "alice", "X-Shared-Secret": SHARED_SECRET}
+ANSWER_HEADER_OK = {"X-User-Id": "alice"}
 
 
 def _hdr(user_id: str) -> dict[str, str]:
-    return {"X-User-Id": user_id, "X-Shared-Secret": SHARED_SECRET}
+    return {"X-User-Id": user_id}
 
 
 async def test_single_turn_returns_answer_and_citations(client: AsyncClient) -> None:
@@ -120,7 +119,6 @@ async def test_semaphore_caps_inflight(
         async with AsyncClient(
             transport=transport,
             base_url="http://test",
-            headers={"X-Shared-Secret": SHARED_SECRET},
         ) as c:
             # Quick race: snapshot inflight just after dispatching
             async def watcher() -> None:

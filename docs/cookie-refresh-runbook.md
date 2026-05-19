@@ -82,10 +82,8 @@ account.
 ## Smoke test after a refresh
 
 ```bash
-SECRET=$(grep ^INTERNAL_AUTH_SHARED_SECRET .env | cut -d= -f2-)
 curl -X POST http://localhost:8002/api/chat \
   -H "X-User-Id: smoketest" \
-  -H "X-Shared-Secret: $SECRET" \
   -H "Content-Type: application/json" \
   -d '{"notebook_id":"<known-id>","question":"ping"}'
 # Expect: 200 + non-empty answer.

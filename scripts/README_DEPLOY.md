@@ -1,4 +1,4 @@
-# notebooklm-bridge 部署手册
+# notebooklm-bridge 部署手册(IT 视角)
 
 把仓库根的 `scripts/pack.sh` 在开发机上跑一次,会生成
 
@@ -7,7 +7,7 @@ dist/notebooklm-bridge-v<VERSION>.tar.gz
 dist/notebooklm-bridge-v<VERSION>.tar.gz.sha256
 ```
 
-把这个 `.tar.gz` 拷到目标机(LAN 内能访问 google.com 的那台),按下面步骤跑。
+把这两个文件拷到目标机(LAN 内能访问 google.com 的那台),按下面 4 步跑。
 
 ---
 
@@ -15,75 +15,65 @@ dist/notebooklm-bridge-v<VERSION>.tar.gz.sha256
 
 目标机需要:
 
+- **桌面环境**(GNOME / KDE / XFCE 之类),`scripts/login.sh` 会弹 Chromium 让你用 Google 账号登录
+- 能访问 `https://notebooklm.google.com` 和 `https://cdn.playwright.dev`(playwright 第一次跑要下载 ~150MB Chromium)
 - Python ≥ 3.11
 - Node ≥ 18(只用来 serve 前端 `dist/`,不需要 npm install)
-- 能直接访问 `https://notebooklm.google.com`(notebooklm-py 单点强制要求)
 - 能监听端口 **8002**(backend)和 **5175**(frontend)— 这是硬约束,见仓库根 `CLAUDE.md` §3.2
+- 能 `sudo apt install`(或 `sudo dnf install`)装 Chromium 依赖的系统库(libnspr4 / libnss3 / …);`login.sh` 会自动检测 + prompt
 
-如果只想跑回环(localhost),后面用 `bash scripts/start-web.sh --local`。
+如果目标机没桌面或不能联网,看 `docs/cookie-refresh-runbook.md` 的 "Fallback" 段。
 
 ---
 
-## 2. 首次部署
+## 2. 首次部署(4 步)
 
 ```bash
-# 校验 tarball 没有损坏(可选但建议)
+# 校验 tarball 没损坏
 sha256sum -c notebooklm-bridge-v<VERSION>.tar.gz.sha256
 
+# 1. 解压
 tar -xzf notebooklm-bridge-v<VERSION>.tar.gz
 cd notebooklm-bridge-v<VERSION>
 
-# 装 .venv + 从 wheels/ 离线装依赖 + 创建 secrets/
+# 2. 装依赖 + 创建 .venv + 准备 .env
 bash deploy.sh
+
+# 3. 弹 Chromium 让你用 Google 账号登录,产出 secrets/auth.json
+bash scripts/login.sh
+
+# 4. 启动
+bash scripts/start-web.sh
 ```
 
-`deploy.sh` 跑完之后还有两件事必须人工补:
-
-### 2.1 写入 INTERNAL_AUTH_SHARED_SECRET
+验证:
 
 ```bash
-# 在已经被 deploy.sh 创建好的 .env 里,把这一行换成真值
-INTERNAL_AUTH_SHARED_SECRET=<paste here>
-
-# 推荐用:
-openssl rand -hex 32
-```
-
-这个秘密给所有内网用户共享 — 前端 fetch 时会在请求头加 `X-Shared-Secret`,跟 backend 比对。
-
-### 2.2 放入 secrets/auth.json
-
-cookies 需要从已经走完 Phase 1 的主机拷过来。具体过程见仓库根的 `docs/cookie-refresh-runbook.md`,核心步骤:
-
-```bash
-# 从 Phase 1 主机
-scp secrets/auth.json target-host:~/notebooklm-bridge-v<VERSION>/secrets/
-
-# 在目标机
-chmod 600 secrets/auth.json
-```
-
----
-
-## 3. 启动 + 验证
-
-```bash
-bash scripts/start-web.sh           # 默认绑 0.0.0.0,LAN 内可访问
-# 或:
-bash scripts/start-web.sh --local   # 只绑 127.0.0.1
-
-# 验证
-curl -fsS http://localhost:8002/api/healthz
+curl -s http://localhost:8002/api/healthz | jq
 # 期望:{"auth_valid": true, ...}
 ```
 
-浏览器开 `http://<目标机 IP>:5175`,首次进会弹窗让输入 X-User-Id。
+浏览器开 `http://<目标机 IP>:5175`,首次进会弹窗让你输入名字 / 工号(就是 `X-User-Id`)。
+
+> **注:v1.0.3 起不再有 `INTERNAL_AUTH_SHARED_SECRET`**。之前那套"开发机 mint secret → 写进前端 build → IT 部署机得 paste 一样的值"的方案被废弃了(它在 IT 跑 `deploy.sh` 自动生成新 secret 时会跟 prebuilt 前端 bundle 错位,所有 API 都 401)。LAN 已经是 trust boundary,X-User-Id 单 header 验证就够。
+
+---
+
+## 3. Cookie 过期后重新登录
+
+`/api/healthz` 显示 `auth_valid=false` 时:
+
+```bash
+cd /path/to/notebooklm-bridge-v<VERSION>
+bash scripts/login.sh                              # 弹浏览器,再登一次
+bash scripts/stop-web.sh && bash scripts/start-web.sh
+```
+
+`login.sh` 是 idempotent 的,可以任意次重跑。`--refresh` flag 强制重登,`--profile NAME` 切换多账号。
 
 ---
 
 ## 4. 升级到新版本
-
-在新版本的 tarball 同级目录解开,然后让 `update.sh` 帮你把 `.env` / `secrets/` / `.venv` 从旧目录搬过来:
 
 ```bash
 tar -xzf notebooklm-bridge-v<NEW>.tar.gz
@@ -94,11 +84,11 @@ bash scripts/start-web.sh
 
 `update.sh` 会:
 
-1. 调 `stop-web.sh` 把旧版本的 supervisor 停掉
-2. 把 `<OLD>/.env`、`<OLD>/secrets/`、`<OLD>/.venv` 复制到当前目录
-3. 在 `.venv` 里用新 `wheels/` 重新装一次 backend 包(包括 notebooklm-bridge 本身)
+1. 调 `stop-web.sh` 停掉旧版本的 supervisor
+2. 把 `<OLD>/.env`、`<OLD>/secrets/`、`<OLD>/state.json` 复制过来(免得重登 + 重做配置)
+3. 在 `.venv` 里用新 `wheels/` 重新装一次 backend 包
 
-升级回滚 = `cd <OLD> && bash scripts/start-web.sh`。state.json 默认在仓库根的 `state.json`,两个版本可以来回切而不丢 session。
+升级回滚:`cd <OLD> && bash scripts/start-web.sh`。`state.json` 默认在目录根,两个版本来回切不丢 session。
 
 ---
 
@@ -106,11 +96,12 @@ bash scripts/start-web.sh
 
 | 症状 | 原因 / 处理 |
 |---|---|
-| `/api/healthz` 返回 `auth_valid: false` | cookie 过期 → 重做 Phase 1 → 覆盖 `secrets/auth.json` → 重启 |
-| `start-web.sh` 报端口被占 | `bash scripts/start-web.sh --force` 会杀掉**本项目目录下**的占端口进程,不会动其他项目的 |
-| 浏览器 401 | `.env` 里 `INTERNAL_AUTH_SHARED_SECRET` 跟前端 build 时注入的不一致 — 重新部署,不要手改 frontend/dist 里的字符串 |
-| 突然 503 集中 | upstream 进了熔断 — 等 30s 自动恢复;`.backend.log` 里有 `circuit_breaker_open` 字样 |
-| 装了一堆 wheels 还报 ModuleNotFoundError | 大概率忘了 `.venv/bin/pip install -e .` — `deploy.sh` / `update.sh` 都会做这一步,直接重跑 |
+| `/api/healthz` 返回 `auth_valid: false` | cookies 过期 → 重跑 `bash scripts/login.sh` → 重启 |
+| `login.sh` 报 "Chromium 缺 lib…" | 按 prompt 跑 `sudo apt-get install …`;脚本会自动 verify |
+| `login.sh` 报 "X server / DISPLAY not available" | 目标机没桌面 → 看 `docs/cookie-refresh-runbook.md` 的 fallback(在你工位机跑 login.sh + scp `secrets/auth.json` 到目标机) |
+| `start-web.sh` 报端口被占 | `bash scripts/start-web.sh --force` 会杀掉**本项目目录下**的占端口进程,不动别的 |
+| 突然 503 集中 | upstream 触发熔断 — 等 30s 自动恢复;`.backend.log` 里有 `circuit_breaker_open` 字样 |
+| `ModuleNotFoundError` | 大概率忘了 `pip install -e .` — `deploy.sh` / `update.sh` 都会做这一步,直接重跑 |
 
 更多见仓库根 `README.md` 和 `docs/upstream-breakage-runbook.md`。
 
@@ -118,9 +109,8 @@ bash scripts/start-web.sh
 
 ## 6. 安全清单
 
-- [ ] `secrets/auth.json` 是 `0600`,owner 限制为运行 bridge 的 system user
-- [ ] `.env` 里的 `INTERNAL_AUTH_SHARED_SECRET` 是 ≥32 字节随机值,**没** commit 到任何代码库
-- [ ] 目标机的防火墙允许 :5175 / :8002 只对你信任的内网开放(不对公网开)
-- [ ] 升级后 `secrets/auth.json` 还是 `0600`(update.sh 会保留权限但建议手验一次)
-
-如果 `.env` 不慎泄露,立刻 rotate `INTERNAL_AUTH_SHARED_SECRET` 然后所有用户都得重新填一遍(实际上前端 build 时注入,所以 rebuild 重 pack 重 deploy 才生效)。
+- [ ] `secrets/auth.json` 是 `0600`,owner 限制为运行 bridge 的 system user(`login.sh` 自动设)
+- [ ] 目标机的防火墙允许 `:5175` / `:8002` 只对你信任的内网开放(**不对公网**)
+- [ ] 升级后 `secrets/auth.json` 还是 `0600`(`update.sh` 会保留权限,建议手验一次)
+- [ ] `state.json` 不要 commit(默认 `.gitignored`)
+- [ ] 别把 `secrets/auth.json` 转贴 / 发给别人 — 它是个有效的 Google session,等价于你账号本身

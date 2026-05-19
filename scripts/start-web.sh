@@ -25,7 +25,7 @@ BACKEND_PORT=8002
 FRONTEND_PORT=5175
 
 # Load .env so the supervised uvicorn process inherits NOTEBOOKLM_AUTH_JSON,
-# STATE_JSON, INTERNAL_AUTH_SHARED_SECRET, etc.
+# STATE_JSON, INTERNAL_FRONTEND_ORIGIN, etc.
 if [ -f "$PROJECT_ROOT/.env" ]; then
     set -a
     # shellcheck disable=SC1091

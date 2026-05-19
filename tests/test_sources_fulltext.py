@@ -11,10 +11,10 @@ from typing import Any
 
 from httpx import AsyncClient
 
-from .conftest import SHARED_SECRET, FakeUpstreamError
+from .conftest import FakeUpstreamError
 
 FULLTEXT_URL = "/api/sources/s1/fulltext"
-HDR = {"X-User-Id": "alice", "X-Shared-Secret": SHARED_SECRET}
+HDR = {"X-User-Id": "alice"}
 
 
 async def test_happy_path_returns_content_and_metadata(

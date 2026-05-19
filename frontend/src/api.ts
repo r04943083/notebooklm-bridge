@@ -1,6 +1,7 @@
 // Thin fetch wrapper. Modeled on cpp_rename/frontend/src/api/client.ts but with
-// X-User-Id + X-Shared-Secret headers (not X-Username) and localStorage (not
-// sessionStorage) so the user identity survives across tab closes.
+// an X-User-Id header (not X-Username) and localStorage (not sessionStorage) so
+// the user identity survives across tab closes. The X-Shared-Secret header was
+// removed in v1.0.3 — see backend/auth.py for the rationale.
 
 import type {
   ChatRequest,
@@ -30,9 +31,6 @@ export class ApiError extends Error {
 
 const API_BASE = "/api";
 
-const SHARED_SECRET =
-  (import.meta.env.VITE_SHARED_SECRET as string | undefined) ?? "";
-
 export function getUserId(): string {
   return localStorage.getItem("nblm_user_id") ?? "";
 }
@@ -45,7 +43,6 @@ function authHeaders(): Record<string, string> {
   const u = getUserId();
   const h: Record<string, string> = {};
   if (u) h["X-User-Id"] = u;
-  if (SHARED_SECRET) h["X-Shared-Secret"] = SHARED_SECRET;
   return h;
 }
 
