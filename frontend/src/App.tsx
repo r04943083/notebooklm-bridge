@@ -96,16 +96,20 @@ export default function App() {
     loadHistory(userId)
   );
 
-  // The currently active conversation. `null` means "fresh, no resumed state";
-  // a string means "we are continuing / restoring this conversation_id".
-  // Intentionally NOT persisted across reloads — a refresh always gives a
-  // clean conversation box. To revisit an earlier chat the user clicks an
-  // entry in the History popover (handleSelectHistory below), which still
-  // rehydrates from `turnsKey(uid, cid)`. Used (a) as part of the ChatPane
-  // key so a history-restore re-mounts cleanly with the right initial turns,
-  // and (b) when "new conversation" is clicked.
+  // Tracks "which conversation the user explicitly picked from the History
+  // popover", NOT "which cid is in-flight on the backend". Starts `null` on
+  // every mount (a refresh = fresh pane); `handleSelectHistory` sets it to
+  // the cid being restored. `handleTurn` deliberately leaves it alone — see
+  // the comment there for why touching it on a send would blank the pane.
+  // Intentionally not persisted across reloads.
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [initialTurns, setInitialTurns] = useState<ChatTurn[]>([]);
+  // Forced-remount counter for ChatPane. Bumped by code paths that need to
+  // wipe the pane to a clean slate even when `activeConversationId` doesn't
+  // change (new-conversation while it's already `null`, clear-history of the
+  // current notebook). See `bumpPane` callers below.
+  const [paneEpoch, setPaneEpoch] = useState(0);
+  const bumpPane = useCallback(() => setPaneEpoch((x) => x + 1), []);
 
   // On first mount only: make sure a reload is truly a clean conversation.
   // The frontend UI is already blank (initialTurns=[], activeConversationId=null),
@@ -209,8 +213,12 @@ export default function App() {
       // Persist the actual conversation content so that a future history-click
       // (or reload) can rehydrate the turns list, not just the notebook.
       appendTurn(userId, cid, turn);
-      // Also remember "this is the conversation I'm in" so reload picks it up.
-      setActiveConversationId(cid);
+      // Deliberately do NOT touch `activeConversationId` here. Doing so would
+      // change the ChatPane key (`...|${activeConversationId ?? "fresh"}|...`),
+      // unmount the pane, and a fresh instance would initialise from
+      // `initialTurns=[]` — wiping the answer the user is currently looking at.
+      // The turn is already in `turnsKey(uid, cid)` and the history entry below
+      // makes it reachable from the History popover, so we don't lose anything.
       setHistory((prev) => {
         const existing = prev.find((h) => h.conversation_id === cid);
         const next = existing
@@ -285,9 +293,14 @@ export default function App() {
       if (nbId === notebookId) {
         setActiveConversationId(null);
         setInitialTurns([]);
+        // `activeConversationId` is usually already `null` after a send (see
+        // handleTurn), so setting it null again doesn't change the ChatPane
+        // key. Bump the epoch so the pane really remounts and drops its
+        // in-memory turns.
+        bumpPane();
       }
     },
-    [history, notebookId, userId]
+    [bumpPane, history, notebookId, userId]
   );
 
   const handleNewConversation = useCallback(async () => {
@@ -300,7 +313,10 @@ export default function App() {
     }
     setActiveConversationId(null);
     setInitialTurns([]);
-  }, [notebookId]);
+    // Same reason as handleClearNotebookHistory: activeConversationId is
+    // typically null already, so we need an explicit epoch bump to remount.
+    bumpPane();
+  }, [bumpPane, notebookId]);
 
   // Render the name-capture modal before anything else. Wrapping it under
   // ThemeProvider keeps the modal's dark mode in sync if the user has the
@@ -349,7 +365,7 @@ export default function App() {
               >
                 {notebookId ? (
                   <ChatPane
-                    key={`${notebookId}|${activeConversationId ?? "fresh"}`}
+                    key={`${notebookId}|${activeConversationId ?? "fresh"}|${paneEpoch}`}
                     notebookId={notebookId}
                     notebookTitle={selectedNotebook?.title}
                     initialTurns={initialTurns}
