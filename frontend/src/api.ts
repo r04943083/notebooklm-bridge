@@ -31,6 +31,22 @@ export class ApiError extends Error {
 
 const API_BASE = "/api";
 
+// FastAPI HTTPException(detail=...) serializes to {"detail": "..."} — surface
+// just that string to the user instead of the full JSON body, so error
+// messages like the "凭证已失效,请联系管理员重新登录" guidance show up
+// cleanly without "API 503: {\"detail\":...}" wrapping. Non-JSON / non-detail
+// responses fall back to the raw text so we don't swallow useful info.
+async function readErrorMessage(res: Response): Promise<string> {
+  const text = await res.text();
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed.detail === "string") return parsed.detail;
+  } catch {
+    // not JSON — fall through
+  }
+  return text || `HTTP ${res.status}`;
+}
+
 export function getUserId(): string {
   return localStorage.getItem("nblm_user_id") ?? "";
 }
@@ -56,8 +72,7 @@ async function request<T>(path: string, opt?: RequestInit): Promise<T> {
     ...opt,
   });
   if (!res.ok) {
-    const text = await res.text();
-    throw new ApiError(res.status, `API ${res.status}: ${text}`);
+    throw new ApiError(res.status, await readErrorMessage(res));
   }
   return res.json() as Promise<T>;
 }
@@ -92,7 +107,7 @@ export const api = {
       { method: "POST", headers: authHeaders() }
     );
     if (!res.ok && res.status !== 204) {
-      throw new ApiError(res.status, `API ${res.status}: ${await res.text()}`);
+      throw new ApiError(res.status, await readErrorMessage(res));
     }
   },
 
@@ -105,7 +120,7 @@ export const api = {
       { method: "POST", headers: authHeaders() }
     );
     if (!res.ok && res.status !== 204) {
-      throw new ApiError(res.status, `API ${res.status}: ${await res.text()}`);
+      throw new ApiError(res.status, await readErrorMessage(res));
     }
   },
 

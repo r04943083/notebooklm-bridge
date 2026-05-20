@@ -55,7 +55,7 @@ _cache = _TTLCache(ttl=_CACHE_TTL_SECONDS)
 def _require_client(request: Request) -> Any:
     client = request.app.state.client
     if client is None:
-        raise HTTPException(status_code=503, detail="服务暂不可用 — 上游凭证未就绪")
+        raise HTTPException(status_code=503, detail="NotebookLM 登录凭证已失效或未配置。请通知系统管理员重新登录(管理员操作:在 bridge 主机执行 `bash scripts/login.sh` 后重启服务)。")
     return client
 
 

@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.6] — 2026-05-20
+
+UX fix: the "credential not ready" 503 error now tells the user what to do
+about it instead of just saying "service unavailable".
+
+### Changed
+
+- **503 detail message** (in `backend/routes/chat.py`, `backend/routes/
+  notebooks.py`, `backend/routes/sources.py`) rewritten from
+  `服务暂不可用 — 上游凭证未就绪` to a full operator-actionable string:
+  `NotebookLM 登录凭证已失效或未配置。请通知系统管理员重新登录(管理员操作:
+  在 bridge 主机执行 bash scripts/login.sh 后重启服务)。`
+  End users now know *why* the bridge is down and *who* to ask; the
+  admin reading it sees the exact command to run.
+
+- **`frontend/src/api.ts`** now parses FastAPI's `{"detail": "..."}` error
+  body and surfaces just the `detail` string. Previously the chat error
+  banner showed the full JSON wrapped in `API 503: {"detail":"..."}`,
+  which obscured the actual message and looked like a server bug to
+  non-technical users. Falls back to raw text for non-JSON / non-`detail`
+  error bodies so nothing useful gets swallowed.
+
 ## [1.0.5] — 2026-05-20
 
 Docs-only release. Captures a real-world lesson learned from a v1.0.4

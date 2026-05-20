@@ -98,7 +98,7 @@ async def chat(
     client = request.app.state.client
     if client is None:
         raise HTTPException(
-            status.HTTP_503_SERVICE_UNAVAILABLE, detail="服务暂不可用 — 上游凭证未就绪"
+            status.HTTP_503_SERVICE_UNAVAILABLE, detail="NotebookLM 登录凭证已失效或未配置。请通知系统管理员重新登录(管理员操作:在 bridge 主机执行 `bash scripts/login.sh` 后重启服务)。"
         )
 
     store = request.app.state.store
