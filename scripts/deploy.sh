@@ -142,23 +142,34 @@ PY_VER="$("$PY" -c 'import sys; print("{}.{}".format(*sys.version_info[:2]))')"
 echo "✓ $PY $PY_VER ($("$PY" -c 'import sys; print(sys.executable)'))"
 echo "✓ node $(node -v)"
 
-# wheels/ must exist and be non-empty — this is the one hard difference between
-# deploy.sh (offline install from tarball) and a dev install. Developers running
-# this in the source repo by mistake should hit this early with a clear hint to
-# use setup.sh / pack.sh instead, NOT a downstream "pip: file not found".
-if [ ! -d wheels ] || ! ls wheels/*.whl >/dev/null 2>&1; then
+# Choose install mode based on what's actually available, instead of forcing
+# the operator to pick the right script. Same `bash scripts/deploy.sh` works
+# from the source repo (no wheels, but has internet) AND from the tarball
+# (wheels present, may be airgapped):
+#   - wheels/ present + non-empty  → offline install from those wheels
+#   - wheels/ missing + PyPI reachable → online install from PyPI
+#   - neither                       → fail with a fix-it hint
+if [ -d wheels ] && ls wheels/*.whl >/dev/null 2>&1; then
+    INSTALL_MODE=offline
+    WHEEL_COUNT=$(ls wheels/*.whl 2>/dev/null | wc -l)
+    echo "✓ offline mode (found $WHEEL_COUNT wheel files in wheels/)"
+elif "$PY" -c "import urllib.request, socket; socket.setdefaulttimeout(8); urllib.request.urlopen('https://pypi.org/simple/notebooklm-py/').read(1)" 2>/dev/null; then
+    INSTALL_MODE=online
+    echo "✓ online mode (no wheels/, but PyPI is reachable)"
+else
     echo "" >&2
-    echo "ERROR: wheels/ missing or empty at $HERE." >&2
-    echo "       deploy.sh installs from offline wheels — meant ONLY for the tarball" >&2
-    echo "       produced by scripts/pack.sh, not for the source repo." >&2
+    echo "ERROR: cannot install backend — neither offline nor online path is available." >&2
+    echo "       • wheels/ is missing or empty (no offline install possible)" >&2
+    echo "       • PyPI (https://pypi.org) is not reachable within 8s either" >&2
     echo "" >&2
-    echo "  → On the deploy host:  get the tarball from the developer machine first" >&2
-    echo "      tar -xzf notebooklm-bridge-vX.Y.Z.tar.gz" >&2
-    echo "      cd notebooklm-bridge-vX.Y.Z && bash deploy.sh" >&2
-    echo "" >&2
-    echo "  → On the developer machine (dev install, not deploy):" >&2
-    echo "      bash scripts/setup.sh" >&2
-    echo "      # or:  $PY -m venv .venv && .venv/bin/pip install -e '.[runtime,dev]'" >&2
+    echo "       Fix one of these:" >&2
+    echo "         → Get an offline tarball from a machine with internet:" >&2
+    echo "             (on dev machine)  bash scripts/pack.sh" >&2
+    echo "             scp dist/notebooklm-bridge-vX.Y.Z.tar.gz this-host:~" >&2
+    echo "             tar -xzf notebooklm-bridge-vX.Y.Z.tar.gz && cd notebooklm-bridge-vX.Y.Z" >&2
+    echo "             bash deploy.sh" >&2
+    echo "         → Or point pip at an internal PyPI mirror, then re-run:" >&2
+    echo "             mkdir -p ~/.pip && echo -e '[global]\nindex-url = https://your-mirror/simple/' >> ~/.pip/pip.conf" >&2
     exit 1
 fi
 
@@ -175,15 +186,54 @@ fi
 
 if [ ! -d .venv ]; then
     echo "→ Creating .venv with $PY"
-    "$PY" -m venv .venv
+    # On Debian/Ubuntu the venv module ships in a separate apt package
+    # (python3.X-venv). If it's missing, `python -m venv` prints a useful
+    # hint but then exits non-zero — set -e would otherwise terminate the
+    # script with no further context. Catch it explicitly and print a
+    # distro-tailored fix.
+    if ! "$PY" -m venv .venv; then
+        echo "" >&2
+        PY_MINOR=$("$PY" -c 'import sys; print(sys.version_info.minor)' 2>/dev/null || echo "?")
+        echo "ERROR: '$PY -m venv .venv' failed (see Python's message above)." >&2
+        case "$DISTRO" in
+            debian)
+                echo "" >&2
+                echo "  → On Debian/Ubuntu the venv module ships separately. Install it:" >&2
+                echo "      sudo apt install -y python3.${PY_MINOR}-venv" >&2
+                echo "    Then re-run:  bash $0" >&2
+                ;;
+            rhel)
+                echo "" >&2
+                echo "  → On RHEL/CentOS/Rocky/Alma the venv module is bundled with python3.11," >&2
+                echo "    so this failure is unusual. Try reinstalling:" >&2
+                echo "      sudo dnf reinstall -y python3.11" >&2
+                ;;
+            suse)
+                echo "" >&2
+                echo "  → On openSUSE/SLES:  sudo zypper install -y python311-base" >&2
+                ;;
+            *)
+                echo "" >&2
+                echo "  → Install the venv module for your Python distribution and re-run." >&2
+                ;;
+        esac
+        exit 1
+    fi
 fi
-echo "→ Installing backend from wheels/ (offline)"
+echo "→ Upgrading pip"
 .venv/bin/pip install --quiet --upgrade pip
-.venv/bin/pip install --quiet --no-index --find-links wheels/ \
-    fastapi 'uvicorn[standard]' pydantic pydantic-settings httpx \
-    'notebooklm-py[browser,cookies]'
-echo "→ Installing notebooklm-bridge package itself"
-.venv/bin/pip install --quiet --no-build-isolation --no-deps -e .
+if [ "$INSTALL_MODE" = "offline" ]; then
+    echo "→ Installing backend from wheels/ (offline)"
+    .venv/bin/pip install --quiet --no-index --find-links wheels/ \
+        fastapi 'uvicorn[standard]' pydantic pydantic-settings httpx \
+        'notebooklm-py[browser,cookies]'
+    .venv/bin/pip install --quiet --no-build-isolation --no-deps -e .
+else
+    # Online: let pip resolve everything from PyPI via the package's
+    # [runtime] extra (which pins notebooklm-py[browser,cookies]==0.4.1).
+    echo "→ Installing backend from PyPI (online, may take a minute)"
+    .venv/bin/pip install --quiet -e '.[runtime]'
+fi
 echo "✓ Backend installed"
 
 # -- secrets/ directory ---------------------------------------------------

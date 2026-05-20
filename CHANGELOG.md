@@ -5,6 +5,62 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.9] — 2026-05-20
+
+`deploy.sh` is now self-sufficient: one command handles both the dev box
+(no wheels, online install from PyPI) and the IT deploy host (offline
+install from the tarball's wheels/). No more "you ran the wrong script,
+go read setup.sh" experience.
+
+### Changed
+
+- **`deploy.sh` auto-selects install mode** based on what's actually on
+  the host:
+  - `wheels/` present and non-empty → offline install from those wheels
+    (the old, only path; unchanged for IT tarball deploys)
+  - `wheels/` missing/empty + PyPI reachable → online install via
+    `pip install -e '.[runtime]'`
+  - neither → fails with two concrete fix paths (offline tarball, or
+    point pip at an internal mirror)
+
+  Motivated by user feedback: "deploy.sh's guidance isn't smart enough.
+  Either install offline, or tell me how to install, but I shouldn't have
+  to intervene." Right.
+
+- **`pyproject.toml` `[runtime]` extra** now pins
+  `notebooklm-py[browser,cookies]==0.4.1` (was bare `notebooklm-py==0.4.1`).
+  Without the `[browser,cookies]` sub-extras, online install would
+  succeed but `scripts/login.sh` would later fail with "notebooklm CLI
+  present but cannot launch browser" — playwright never got installed.
+  Verified with `pip install --dry-run -e '.[runtime]'`: playwright,
+  pyee, greenlet are now pulled correctly.
+
+### Added
+
+- **Distro-aware venv-failure handler**. When `$PY -m venv .venv` fails
+  (very common on Ubuntu/Debian where the venv module lives in a
+  separate `python3.X-venv` package that isn't installed by default),
+  Python's own message is shown, then deploy.sh prints a tailored
+  follow-up:
+  - debian → `sudo apt install -y python3.${MINOR}-venv` with the
+    detected Python's actual minor version, and a "then re-run: bash $0"
+  - rhel → suggests `sudo dnf reinstall python3.11` (venv module ships
+    bundled, so failure is unusual)
+  - suse → `sudo zypper install -y python311-base`
+  - other → generic install-the-venv-module hint
+
+### Verified end-to-end
+
+Ran `./scripts/deploy.sh` from the source repo on WSL Ubuntu
+(/home/luyh/work/notebooklm-bridge) this release:
+- mode detection prints `✓ online mode (no wheels/, but PyPI is reachable)`
+- venv creation hits Ubuntu's missing `python3.12-venv` and the new
+  handler prints the right `sudo apt install` line
+- `pip install --dry-run -e '.[runtime]'` against the new pyproject
+  resolves all deps including playwright (via `notebooklm-py[browser]`)
+  and would land `notebooklm-bridge-1.0.8` — i.e. the full install path
+  would succeed once the system venv package is installed
+
 ## [1.0.8] — 2026-05-20
 
 `deploy.sh` / `update.sh` no longer fail with cryptic

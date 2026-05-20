@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "notebooklm-bridge"
-version = "1.0.8"
+version = "1.0.9"
 description = "Internal HTTP + web bridge sharing one Google account's NotebookLM with an intranet team."
 requires-python = ">=3.11"
 readme = "README.md"
@@ -24,7 +24,10 @@ dependencies = [
 #   2. run `pip install -e '.[runtime]'`,
 #   3. update docs/notebooklm-py-integration.md if the API shape changed.
 runtime = [
-    "notebooklm-py==0.4.1",  # placeholder — pin after Phase 1
+    # browser+cookies extras are required by scripts/login.sh — they pull in
+    # playwright and the cookies-store side. Without them, login.sh fails with
+    # "notebooklm CLI present but cannot launch browser".
+    "notebooklm-py[browser,cookies]==0.4.1",
 ]
 dev = [
     "pytest>=8",
