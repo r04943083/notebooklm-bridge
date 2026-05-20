@@ -52,12 +52,15 @@ have multiple versions installed and `python3` resolves to the wrong one.
 EOF
 
 # -- Preflight ------------------------------------------------------------
-# Find a Python >= 3.11 interpreter. On hosts where the system default
-# `python3` is older (e.g. 3.9) but python3.11 is available as a side-install,
-# we MUST use the side-install — otherwise `python3 -m venv .venv` creates a
-# 3.9 venv and pip then refuses to install the cp311 wheels in wheels/.
+# Find python3.11 specifically. We DELIBERATELY don't fall back to python3.12
+# or whatever `python3` happens to be: pack.sh produces wheels locked to
+# cp311 manylinux2014, so an offline deploy on 3.12 would crash with
+# ABI-mismatch errors. Keeping dev and deploy hosts on the same minor version
+# (3.11) also eliminates a class of "works on my machine" bugs.
+#
+# Operators who really want to use a different 3.11+ interpreter can override
+# with PYTHON_BIN=/full/path/to/whatever — we'll honour that and trust them.
 find_python311() {
-    local candidate
     if [ -n "${PYTHON_BIN:-}" ]; then
         if "$PYTHON_BIN" -c 'import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)' 2>/dev/null; then
             echo "$PYTHON_BIN"; return 0
@@ -65,12 +68,10 @@ find_python311() {
         echo "ERROR: PYTHON_BIN=$PYTHON_BIN does not point at Python >= 3.11" >&2
         return 1
     fi
-    for candidate in python3.11 python3.12 python3; do
-        if command -v "$candidate" >/dev/null 2>&1 \
-           && "$candidate" -c 'import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)' 2>/dev/null; then
-            echo "$candidate"; return 0
-        fi
-    done
+    if command -v python3.11 >/dev/null 2>&1 \
+       && python3.11 -c 'import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)' 2>/dev/null; then
+        echo "python3.11"; return 0
+    fi
     return 1
 }
 
@@ -93,34 +94,36 @@ detect_distro() {
 
 DISTRO=$(detect_distro)
 
-# Distro-specific hint for installing Python 3.11. Printed only when the probe
-# fails — most hosts already have it and don't need to read this.
+# Distro-specific hint for installing python3.11 (and its venv module where
+# the distro splits venv into a separate package, i.e. Debian/Ubuntu).
+# Printed only when find_python311 fails.
 print_python311_install_hint() {
     case "$DISTRO" in
         debian)
-            echo "       Ubuntu 22.04+ / Debian 12+:"
-            echo "         sudo apt update && sudo apt install -y python3.11 python3.11-venv"
-            echo "       Ubuntu 20.04 needs the deadsnakes PPA first:"
+            echo "       Ubuntu 22.04+ / Debian 12+ ship python3.11 (Debian 12) or via deadsnakes PPA:"
             echo "         sudo add-apt-repository ppa:deadsnakes/ppa && sudo apt update"
             echo "         sudo apt install -y python3.11 python3.11-venv"
+            echo ""
+            echo "       (You may have python3.12 system-wide on Ubuntu 24.04, but this project pins"
+            echo "       cp311 wheel ABI — pack.sh's offline wheels won't install on a 3.12 venv.)"
             ;;
         rhel)
-            echo "       RHEL 9 / CentOS Stream 9 / Rocky 9 / AlmaLinux 9:"
+            echo "       RHEL 9 / CentOS Stream 9 / Rocky 9 / AlmaLinux 9 ship 3.11 in default AppStream:"
             echo "         sudo dnf install -y python3.11"
-            echo "       (3.11 is in the default AppStream; venv module is bundled — no separate -venv package)"
+            echo "       (venv module is bundled with python3.11 — no separate -venv package needed)"
             ;;
         suse)
             echo "       openSUSE / SLES:"
             echo "         sudo zypper install -y python311 python311-venv"
             ;;
         *)
-            echo "       Distro not detected. Install Python 3.11 via your package manager"
+            echo "       Distro not detected. Install python3.11 via your package manager"
             echo "       or pyenv (https://github.com/pyenv/pyenv)."
             ;;
     esac
     echo ""
-    echo "       If python3.11 ends up at a non-PATH location, point at it explicitly:"
-    echo "         PYTHON_BIN=/full/path/to/python3.11 bash deploy.sh"
+    echo "       If python3.11 is installed at a non-PATH location, point at it directly:"
+    echo "         PYTHON_BIN=/full/path/to/python3.11 bash $0"
 }
 
 PY=$(find_python311) || {
@@ -220,19 +223,22 @@ if [ ! -d .venv ]; then
         exit 1
     fi
 fi
-echo "→ Upgrading pip"
-.venv/bin/pip install --quiet --upgrade pip
+echo "→ Upgrading pip (this can be slow on a constrained network — pip's own progress will print)"
+.venv/bin/pip install --upgrade pip
 if [ "$INSTALL_MODE" = "offline" ]; then
     echo "→ Installing backend from wheels/ (offline)"
-    .venv/bin/pip install --quiet --no-index --find-links wheels/ \
+    .venv/bin/pip install --no-index --find-links wheels/ \
         fastapi 'uvicorn[standard]' pydantic pydantic-settings httpx \
         'notebooklm-py[browser,cookies]'
-    .venv/bin/pip install --quiet --no-build-isolation --no-deps -e .
+    .venv/bin/pip install --no-build-isolation --no-deps -e .
 else
     # Online: let pip resolve everything from PyPI via the package's
     # [runtime] extra (which pins notebooklm-py[browser,cookies]==0.4.1).
-    echo "→ Installing backend from PyPI (online, may take a minute)"
-    .venv/bin/pip install --quiet -e '.[runtime]'
+    # Output is NOT quieted — on slow / proxied networks the install can take
+    # several minutes; seeing pip's per-package progress is the only way the
+    # operator knows it's actually working and not hung.
+    echo "→ Installing backend from PyPI (online; expect a few minutes on slow networks)"
+    .venv/bin/pip install -e '.[runtime]'
 fi
 echo "✓ Backend installed"
 

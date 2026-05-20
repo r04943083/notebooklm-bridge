@@ -5,6 +5,55 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.10] — 2026-05-20
+
+Fixes two issues from user feedback on v1.0.9:
+1. "Why do I need to install python3.12-venv when I already have 3.12 and
+   the deploy host has 3.11? Why aren't we aligned?"
+2. "`→ Upgrading pip` hangs forever, are you really testing this?"
+
+### Changed
+
+- **`find_python311()` is now strict about python3.11** in both deploy.sh
+  and update.sh. Previously it fell back to `python3.12 → python3` if
+  3.11 wasn't there, which forced dev hosts onto 3.12 and forced the
+  user to install `python3.12-venv` they shouldn't need. Worse, dev on
+  3.12 + deploy on 3.11 means cp312 wheels can't install on the cp311
+  venv that `pack.sh` produces — a silent ABI mismatch waiting to happen.
+
+  Now: only `python3.11` is auto-detected. If the host doesn't have it,
+  the error tells you exactly how to install python3.11 for your distro
+  (with the deadsnakes PPA caveat for Ubuntu 24.04). `PYTHON_BIN=…`
+  still overrides for operators who really do want a different
+  interpreter.
+
+- **`pip install --quiet` removed everywhere.** On slow / proxied
+  networks (the user's dev box gets ~160KB/s to pypi.org), online install
+  takes several minutes. With `--quiet` there's zero output during that
+  window, which looks identical to "hung". Now pip's own per-package
+  `Using cached …` / `Downloading …` / `Installing …` lines stream out,
+  so the operator can tell it's working. Same change in update.sh.
+
+- **`scripts/update.sh`** also gains the `notebooklm-py[browser,cookies]`
+  extras (was bare `notebooklm-py`) — same bug as v1.0.9 fixed in
+  pyproject.toml `[runtime]`, only now also in update.sh's offline pip
+  invocation.
+
+### Verified
+
+Ran `pip install -e '.[runtime]'` end-to-end on the dev box this release
+(in a fresh python3.12 venv since we don't have 3.11 here — the install
+*flow* is the same on 3.11; only the cp tag of the wheels differs).
+Result: 30+ packages downloaded, including `playwright-1.60.0`,
+`rookiepy-0.5.6` (cookies extra), `notebooklm-py-0.4.1`,
+`notebooklm-bridge-1.0.10`. No hangs. pip output streamed continuously.
+
+Ran `./scripts/deploy.sh` on the dev box (no python3.11 installed):
+- mode detection prints `✓ online mode`
+- find_python311 fails fast (no more silent fallback to 3.12)
+- distro-aware hint tells the operator to `sudo apt install -y
+  python3.11 python3.11-venv` (with deadsnakes PPA note for 24.04)
+
 ## [1.0.9] — 2026-05-20
 
 `deploy.sh` is now self-sufficient: one command handles both the dev box

@@ -72,11 +72,9 @@ for d in secrets state .venv; do
 done
 
 # -- Refresh the venv: reinstall from new wheels/ -------------------------
-# If a fresh venv is needed, find a 3.11 interpreter the same way deploy.sh does
-# so a host with both 3.9 and 3.11 installed doesn't accidentally pick 3.9 and
-# then choke on the cp311 wheels.
+# Find python3.11 specifically — see deploy.sh for the "why strict 3.11"
+# rationale (cp311 wheel ABI lock-in). PYTHON_BIN= overrides.
 find_python311() {
-    local candidate
     if [ -n "${PYTHON_BIN:-}" ]; then
         if "$PYTHON_BIN" -c 'import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)' 2>/dev/null; then
             echo "$PYTHON_BIN"; return 0
@@ -84,12 +82,10 @@ find_python311() {
         echo "ERROR: PYTHON_BIN=$PYTHON_BIN does not point at Python >= 3.11" >&2
         return 1
     fi
-    for candidate in python3.11 python3.12 python3; do
-        if command -v "$candidate" >/dev/null 2>&1 \
-           && "$candidate" -c 'import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)' 2>/dev/null; then
-            echo "$candidate"; return 0
-        fi
-    done
+    if command -v python3.11 >/dev/null 2>&1 \
+       && python3.11 -c 'import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)' 2>/dev/null; then
+        echo "python3.11"; return 0
+    fi
     return 1
 }
 
@@ -112,9 +108,9 @@ if [ ! -d .venv ]; then
     "$PY" -m venv .venv
 fi
 echo "→ Reinstalling backend from new wheels/"
-.venv/bin/pip install --quiet --no-index --find-links wheels/ --upgrade \
-    fastapi 'uvicorn[standard]' pydantic pydantic-settings httpx notebooklm-py
-.venv/bin/pip install --quiet --no-build-isolation --no-deps -e . --force-reinstall
+.venv/bin/pip install --no-index --find-links wheels/ --upgrade \
+    fastapi 'uvicorn[standard]' pydantic pydantic-settings httpx 'notebooklm-py[browser,cookies]'
+.venv/bin/pip install --no-build-isolation --no-deps -e . --force-reinstall
 
 # -- Confirm 0600 on auth.json (cp -a should already, double check) -------
 if [ -f secrets/auth.json ]; then
