@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.2] — 2026-05-20
+
+`scripts/login.sh` 也要 source `.python-env`。v2.0.1 改了 deploy.sh / start-web.sh
+但漏了 login.sh — 在自建 Python 主机上 deploy 完跑 `bash scripts/login.sh` 直接
+报 `libpython3.11.so.1.0: cannot open shared object file`。修法和其他两个一致:
+脚本顶部如果 `$HERE/.python-env` 存在就 source 它。
+
+### Fixed
+
+- `scripts/login.sh` source `$HERE/.python-env`(跟 deploy.sh / start-web.sh
+  对齐),自建 Python 装好后能直接 login,不需要操作员手动拼 LD_LIBRARY_PATH。
+
 ## [2.0.1] — 2026-05-20
 
 新增 `scripts/check-python.sh`,处理自编译 / devtoolset 风格 Python 的部署。
