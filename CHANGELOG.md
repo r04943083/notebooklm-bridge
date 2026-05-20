@@ -5,6 +5,83 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] — 2026-05-20
+
+部署去复杂化(BREAKING):从 v1.0.x 累积的双安装路径(online + offline wheels)、
+strict Python 3.11、四套发行版分支等防御性逻辑被砍掉一半,回到"傻瓜式"傍流。
+触发点是 v1.0.10 strict 锁 3.11 导致 maintainer 在自己的 Ubuntu 24.04 + python3.12
+开发机上跑 `./scripts/deploy.sh` 都跑不通 — 那个锁本来只对 offline wheels 这条路径
+成立,顺手把 online 路径也挂掉了。
+
+### Added
+
+- **固定 install 路径 + 升级零干预**。`deploy.sh` 现在把新版本源码 rsync 到
+  `~/notebooklm-bridge`(用 `NOTEBOOKLM_BRIDGE_HOME=/path` 覆盖默认值),
+  排除掉 `secrets/` / `.env` / `state.json` / `.venv/` / log / pid 文件 —
+  首次部署 = 升级,**完全同一条命令**,不需要拷文件、不需要重登 Google。
+  灵感来自用户反馈"我升级版本了,底下只要有登入的记录,也不用再重新登入"。
+- **`scripts/deploy.sh` 自动下载 Playwright Chromium**。`pip install -e
+  '.[runtime]'` 之后立刻跑 `.venv/bin/playwright install chromium`(~150MB
+  从 cdn.playwright.dev,幂等),这样 `scripts/login.sh` 一定有浏览器可用。
+
+### Fixed
+
+- **`scripts/login.sh` 不再谎称"first login will fetch Chromium"**。原
+  Step 2 看到 `~/.cache/ms-playwright/chromium*` 为空时,打印"the first
+  'notebooklm login' will fetch it" — 但 notebooklm-py CLI **不会**自动调
+  `playwright install`,真缺二进制时会直接 `BrowserError: Executable doesn't
+  exist`。现在 Chromium 二进制由 `deploy.sh` 提前装好;`login.sh` 若仍看到
+  缺失就 fail-fast 给正确的 `playwright install chromium` 修复命令。
+- **`login.sh` "Chromium still can't load" hint 的命令错误**。原来在装系统库
+  失败时建议跑 `sudo … playwright install-deps chromium` —— 这是装系统库
+  (libnss3 等),不是装 Chromium 二进制本身。现在错误信息把"装二进制
+  (`playwright install chromium`,无 sudo)"和"装系统库(`playwright
+  install-deps chromium`,带 sudo)"分开列清楚。
+
+### Removed (BREAKING)
+
+- **`scripts/update.sh`** — 升级流程改为"备份 `.env`+`secrets/` → 解新 tarball
+  → 拷回 → `bash scripts/deploy.sh`"。`deploy.sh` 已经幂等(broken venv 自动重
+  建,secrets/.env 已存在则保留),专门一个 `update.sh` 收益不抵复杂度。
+- **`scripts/setup.sh`** — Phase 1 时给开发者用的"探测 CLI + pin pyproject + 烟测",
+  notebooklm-py 现在已稳定 pin 在 pyproject `[runtime]`,这个脚本没用了。dev
+  环境起步改成 `pip install -e '.[runtime,dev]'` 一行(README "Developer setup" 段)。
+- **离线 `wheels/` 安装路径** — `deploy.sh` 不再有 offline 分支,只有 online
+  (`pip install -e '.[runtime]'`)。`pack.sh` 不再产 `wheels/` 目录,tarball
+  从 ~40MB 降到 ~5MB。
+- **`requirements-runtime.txt`** — 只服务 pack.sh 的 `pip download`,现在不需要了。
+- **`detect_distro()` 在 `deploy.sh` 内的所有引用** — distro 检测只保留在 `login.sh`
+  (Chromium 系统依赖那块真的需要分 apt/dnf/zypper)。deploy.sh 的 venv 失败 hint
+  统一成一段简洁文本,不再分三套包名。
+
+### Changed
+
+- **Python 版本约束 `>=3.11.x` strict → `>=3.11` 任意小版本**。`find_python311`
+  改名 `find_python`,按 `python3.13 → python3.12 → python3.11 → python3` 顺序
+  探,第一个 `>=3.11` 就用。online 装 pip 自动按本机解释器挑 wheel,3.11/3.12/3.13
+  都能跑。Ubuntu 24.04 默认 3.12 不再需要装 deadsnakes PPA。
+- **`pack.sh` 步骤从 [1/6] 简化到 [1/5]**(删了 "Download offline wheels" 那一
+  步)。其他不变(版本一致性检查 / 前端 build / staging / tar+sha256)。
+- **README.md / scripts/README_DEPLOY.md** — Quick start 仍是 4 步,Requirements
+  改写为"Python ≥ 3.11 任意小版本 / pypi.org 在线访问 / cdn.playwright.dev"。
+  升级流程一段重写。
+
+### Migration
+
+旧 tarball(v1.0.x)+ `update.sh` 升级到部署机已经装好的旧 install 仍可用
+(没动那些旧脚本的逻辑,只是新版本不再产)。从 v2.0.0 开始,升级走 README §4
+新流程。
+
+如果未来某次部署机真的完全离线,`git checkout v1.0.10` 拿到最后一个带 offline
+wheels 的版本。
+
+### Verified
+
+- `bash -n scripts/deploy.sh scripts/pack.sh` syntax check pass
+- Maintainer dev box(WSL Ubuntu 24.04, python3.12,无 python3.11)端到端:
+  `./scripts/deploy.sh` 走 online 路径,`pip install -e '.[runtime]'` 真装齐 30+ 包
+- `tar -tzf dist/notebooklm-bridge-v2.0.0.tar.gz | wc -l` 验证 tarball 不再含 wheels/
+
 ## [1.0.10] — 2026-05-20
 
 Fixes two issues from user feedback on v1.0.9:

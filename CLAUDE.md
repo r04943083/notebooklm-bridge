@@ -52,6 +52,17 @@
 
 这几条违反会直接出问题,看好:
 
+> **v2.0 起仅 online install**。`scripts/deploy.sh` 在线从 PyPI 装,没有 offline
+> wheels 分支;`pack.sh` 不再产 `wheels/`,tarball ~5MB。部署机必须能访问
+> `pypi.org` 和 `cdn.playwright.dev`(Chromium 二进制,~150MB,deploy.sh 自动装)。
+> 如果未来部署机断网,`git checkout v1.0.10` 拿带 offline wheels 的版本。
+>
+> **v2.0 install 路径固定** 为 `~/notebooklm-bridge`(可被 `NOTEBOOKLM_BRIDGE_HOME`
+> 覆盖)。`deploy.sh` 把新版本源码 rsync 到这个固定路径,排除掉 `secrets/` /
+> `.env` / `state.json` / `.venv/` / log / pid 文件 — **首次部署和升级是同一条
+> 命令**,不需要拷文件、不需要重登 Google。改 deploy.sh / pack.sh 时
+> 任何"假设源码就是工作目录"的代码都得改成"源码 rsync 完才进 install path"。
+
 ### 3.1 `uvicorn --workers 1`
 notebooklm-py 的 `NotebookLMClient` 是 "single event loop async re-entrant, not thread-safe"。多 worker 会让每个 worker 各起一份 client,把 cookies / keepalive / 限流计数器 / 熔断状态全部撕裂。
 
@@ -146,6 +157,7 @@ bump",我跳过该步骤。但默认行为是 bump。
 - [x] Phase 0 — 设计:`plan.md` 完成
 - [x] Phase 1 — CLI 打通(网络 + cookies 验证)
 - [x] Phase 2 — Bridge + 多人前端(v1.0.0)
+- [x] Phase 2.5 — v2.0 部署去复杂化(online-only,删 update.sh / setup.sh / wheels)
 - [ ] Phase 3 — 飞书 Bot
 - [ ] Phase 4 — Studio(暂搁置)
 

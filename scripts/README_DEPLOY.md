@@ -16,8 +16,8 @@ dist/notebooklm-bridge-v<VERSION>.tar.gz.sha256
 目标机需要:
 
 - **桌面环境**(GNOME / KDE / XFCE 之类),`scripts/login.sh` 会弹 Chromium 让你用 Google 账号登录
-- 能访问 `https://notebooklm.google.com` 和 `https://cdn.playwright.dev`(playwright 第一次跑要下载 ~150MB Chromium)
-- **Python ≥ 3.11**(打包里的 wheels 是 cp311 ABI,3.10 装不进、3.9 完全跑不了)
+- 能访问 `https://pypi.org`(`deploy.sh` 在线装 backend Python 包)、`https://cdn.playwright.dev`(`deploy.sh` 自动下载 ~150MB Chromium 浏览器二进制)、`https://notebooklm.google.com`(bridge 运行时)
+- **Python ≥ 3.11**(任意小版本 — 3.11 / 3.12 / 3.13 都可以,pip 会按你机器上的解释器挑对应的 wheel)
 - Node ≥ 18(只用来 serve 前端 `dist/`,不需要 npm install)
 - 起始端口 **8002**(backend)和 **5175**(frontend);如果被占,`start-web.sh` 会自动
   在 `[8002,8011]` / `[5175,5184]` 范围 probe,选第一个空闲的。10 个都被占才报错。见 §5。
@@ -25,19 +25,15 @@ dist/notebooklm-bridge-v<VERSION>.tar.gz.sha256
 
 ### 1.1 多 Python 版本共存的机器
 
-如果目标机同时装了 3.9 和 3.11(常见情况:系统默认 `python3` 是 3.9,但 IT 把
-`python3.11` 单独装上了),`deploy.sh` / `update.sh` 会**自动**按
-`python3.11 → python3.12 → python3` 顺序找第一个满足 `>=3.11` 的解释器,不会被
-"系统默认 python3 是 3.9"卡住。
+`deploy.sh` 会按 `python3.13 → python3.12 → python3.11 → python3` 顺序探,选第一个
+满足 `>=3.11` 的解释器。不会被"系统默认 python3 是 3.9"卡住。
 
-如果 `python3.11` 装在不在 `$PATH` 的位置(比如 `/opt/python3.11/bin/python3.11`),
+如果你的 Python 装在不在 `$PATH` 的位置(比如 `/opt/python3.12/bin/python3.12`),
 用环境变量 override:
 
 ```bash
-PYTHON_BIN=/opt/python3.11/bin/python3.11 bash deploy.sh
+PYTHON_BIN=/opt/python3.12/bin/python3.12 bash deploy.sh
 ```
-
-`update.sh` 也认同一个环境变量。
 
 ### 1.2 按发行版的具体准备步骤
 
@@ -119,13 +115,18 @@ sha256sum -c notebooklm-bridge-v<VERSION>.tar.gz.sha256
 tar -xzf notebooklm-bridge-v<VERSION>.tar.gz
 cd notebooklm-bridge-v<VERSION>
 
-# 2. 装依赖 + 创建 .venv + 准备 .env
+# 2. 部署:rsync 源码到 ~/notebooklm-bridge,装 .venv + 依赖 + Chromium、
+#    创建 secrets/ + .env(同一句命令也用于升级,见 §4)。
+#    要换装到别的路径:  NOTEBOOKLM_BRIDGE_HOME=/opt/notebooklm-bridge bash deploy.sh
 bash deploy.sh
 
-# 3. 弹 Chromium 让你用 Google 账号登录,产出 secrets/auth.json
+# 3. 切到固定安装路径,后面所有命令都在这里跑
+cd ~/notebooklm-bridge
+
+# 4. 弹 Chromium 让你用 Google 账号登录,产出 secrets/auth.json
 bash scripts/login.sh
 
-# 4. 启动
+# 5. 启动
 bash scripts/start-web.sh
 ```
 
@@ -156,7 +157,7 @@ curl -s http://localhost:8002/api/healthz | jq
 `/api/healthz` 显示 `auth_valid=false` 时:
 
 ```bash
-cd /path/to/notebooklm-bridge-v<VERSION>
+cd ~/notebooklm-bridge                             # 固定安装路径
 bash scripts/login.sh                              # 弹浏览器,再登一次
 bash scripts/stop-web.sh && bash scripts/start-web.sh
 ```
@@ -167,20 +168,23 @@ bash scripts/stop-web.sh && bash scripts/start-web.sh
 
 ## 4. 升级到新版本
 
+跟首装**完全一样的命令**。`deploy.sh` 把新版本源码 rsync 到固定安装路径
+(`~/notebooklm-bridge`),`secrets/auth.json` / `.env` / `state.json` / `.venv/`
+全部自动保留。
+
 ```bash
 tar -xzf notebooklm-bridge-v<NEW>.tar.gz
 cd notebooklm-bridge-v<NEW>
-bash update.sh /path/to/notebooklm-bridge-v<OLD>
-bash scripts/start-web.sh
+bash deploy.sh                       # rsync 到 ~/notebooklm-bridge,凭证 / 状态 / venv 全保留
+cd ~/notebooklm-bridge
+bash scripts/stop-web.sh && bash scripts/start-web.sh
 ```
 
-`update.sh` 会:
+不需要拷 secrets、不需要重登、session 不丢。
 
-1. 调 `stop-web.sh` 停掉旧版本的 supervisor
-2. 把 `<OLD>/.env`、`<OLD>/secrets/`、`<OLD>/state.json` 复制过来(免得重登 + 重做配置)
-3. 在 `.venv` 里用新 `wheels/` 重新装一次 backend 包
-
-升级回滚:`cd <OLD> && bash scripts/start-web.sh`。`state.json` 默认在目录根,两个版本来回切不丢 session。
+升级回滚:旧 tarball 解压目录还在的话,可以从那里再跑 `bash deploy.sh` 把旧
+源码 rsync 回 `~/notebooklm-bridge` 完成回滚;`.venv` 会保留(里面装的是
+**最新**版本对应的依赖,如果旧版本依赖不一样需要重跑 `pip install -e '.[runtime]'`)。
 
 ---
 
@@ -193,9 +197,12 @@ bash scripts/start-web.sh
 | `login.sh` 报 "X server / DISPLAY not available" | 目标机没桌面 → 看 `docs/cookie-refresh-runbook.md` 的 fallback(在你工位机跑 login.sh + scp `secrets/auth.json` 到目标机) |
 | `start-web.sh` 启动慢一拍并提示 "Port 8002 busy ... trying next" | 起始端口被占,脚本自动跳到 8003 / 8004 / …;查实际端口跑 `bash scripts/status-web.sh` 或看 `.runtime-ports.json`。属预期行为,不算 bug。 |
 | `start-web.sh` 报 "no free port for backend in [8002, 8011]" | 起始端口 +9 范围全占,真没空了。要么 `.env` 里把 `BACKEND_PORT` 换到别的段(比如 9100),要么先释放些端口。`--force` 仅能杀**本项目目录下**的进程释放起始端口,不动别的项目。 |
-| `deploy.sh` 报 "need Python >= 3.11" | `python3` 默认是 3.9 但机器装了 3.11 → 用 `PYTHON_BIN=/path/to/python3.11 bash deploy.sh`;详见 §1.1 |
+| `deploy.sh` 报 "no Python >= 3.11 found" | 机器装的 `python3` 太老 → 装 `python3.11` 或更新版本,或用 `PYTHON_BIN=/path/to/python3 bash deploy.sh`;详见 §1.1 |
+| `deploy.sh` 报 "playwright install chromium failed" | cdn.playwright.dev 不通 → 检查防火墙/代理。已部分下载的可以手工补:`cd ~/notebooklm-bridge && .venv/bin/playwright install chromium` |
+| `login.sh` 报 "Playwright Chromium binary not found" | 不该出现 — `deploy.sh` 会先装好。若真出现:`cd ~/notebooklm-bridge && .venv/bin/playwright install chromium` |
+| 想把 install 路径换到 `/opt/notebooklm-bridge` | `NOTEBOOKLM_BRIDGE_HOME=/opt/notebooklm-bridge bash deploy.sh`(先 `sudo mkdir /opt/notebooklm-bridge && sudo chown $USER`)。换路径后所有命令(login/start-web/stop-web)都在新路径下跑。 |
 | 突然 503 集中 | upstream 触发熔断 — 等 30s 自动恢复;`.backend.log` 里有 `circuit_breaker_open` 字样 |
-| `ModuleNotFoundError` | 大概率忘了 `pip install -e .` — `deploy.sh` / `update.sh` 都会做这一步,直接重跑 |
+| `ModuleNotFoundError` | 大概率忘了 `pip install -e '.[runtime]'` — `deploy.sh` 会做这一步,直接重跑 |
 
 更多见仓库根 `README.md` 和 `docs/upstream-breakage-runbook.md`。
 
@@ -205,6 +212,6 @@ bash scripts/start-web.sh
 
 - [ ] `secrets/auth.json` 是 `0600`,owner 限制为运行 bridge 的 system user(`login.sh` 自动设)
 - [ ] 目标机的防火墙允许 `:5175` / `:8002` 只对你信任的内网开放(**不对公网**)
-- [ ] 升级后 `secrets/auth.json` 还是 `0600`(`update.sh` 会保留权限,建议手验一次)
+- [ ] 升级后 `secrets/auth.json` 还是 `0600`(`cp -a` 保留权限,但建议手验一次:`stat -c '%a' secrets/auth.json` 应输出 `600`)
 - [ ] `state.json` 不要 commit(默认 `.gitignored`)
 - [ ] 别把 `secrets/auth.json` 转贴 / 发给别人 — 它是个有效的 Google session,等价于你账号本身

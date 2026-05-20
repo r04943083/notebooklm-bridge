@@ -1,23 +1,32 @@
 #!/usr/bin/env bash
-# First-time install on a target LAN host. Run from inside an unpacked
-# notebooklm-bridge-vX.Y.Z/ directory.
+# First-time install (and upgrade) on a target LAN host. Run from inside an
+# unpacked notebooklm-bridge-vX.Y.Z/ directory — or from this repo's checkout.
 #
-# What this does (idempotent — safe to re-run):
-#   1. Verify python3 / node available.
-#   2. Create .venv, install backend offline from wheels/.
-#   3. Create secrets/ (mode 700).
-#   4. If .env missing, copy .env.example and warn the operator to fill it in.
-#   5. Print next steps (drop in secrets/auth.json, then bash scripts/start-web.sh).
+# What this does (idempotent — safe to re-run for upgrades):
+#   1. Find a usable Python (>=3.11, any minor — 3.11 / 3.12 / 3.13 all OK)
+#      and node.
+#   2. rsync source into the fixed install path (default ~/notebooklm-bridge,
+#      override with NOTEBOOKLM_BRIDGE_HOME=/path). Preserves secrets/, .env,
+#      state.json, .venv/, .runtime-ports.json, log/pid files across versions.
+#   3. Create .venv at $INSTALL_HOME/.venv and install backend from PyPI.
+#   4. Run `playwright install chromium` so login.sh has the browser ready.
+#   5. Create secrets/ (mode 700) and .env (from .env.example if missing).
+#   6. Print next steps (cd $INSTALL_HOME → login.sh → start-web.sh).
 #
 # What this does NOT do — by design:
 #   * Mint Google cookies (scripts/login.sh does that — see "Next steps" below)
 #   * Start the service (operator runs scripts/start-web.sh after login.sh)
+#
+# v2.0 simplifications:
+#   - online-only install (no offline wheels/; `git checkout v1.0.10` for offline)
+#   - fixed install path: deploy.sh + upgrade are the same command
+#   - .venv lives under the install path, not the tarball-extract directory
 
 set -euo pipefail
 
 # deploy.sh ships at the tarball's top-level directory (pack.sh copies it there
 # from scripts/), but in the source repo it actually lives at scripts/deploy.sh.
-# Auto-locate the project root by looking for pyproject.toml so both invocations
+# Auto-locate the source root by looking for pyproject.toml so both invocations
 # work:
 #   ./deploy.sh                  (from inside an unpacked tarball)
 #   ./scripts/deploy.sh          (from inside the source repo)
@@ -32,112 +41,75 @@ if [ ! -f "$HERE/pyproject.toml" ]; then
         exit 1
     fi
 fi
-cd "$HERE"
 
-cat <<'EOF'
+INSTALL_HOME="${NOTEBOOKLM_BRIDGE_HOME:-$HOME/notebooklm-bridge}"
+
+cat <<EOF
 ============================================================
- notebooklm-bridge — first-time deploy
+ notebooklm-bridge — deploy
 ============================================================
+Source dir:    $HERE
+Install path:  $INSTALL_HOME    (override with NOTEBOOKLM_BRIDGE_HOME=/path)
+
 Required on this host:
-  - Python 3.11+          (notebooklm-py upstream is >=3.10; we pin 3.11
-                           because the offline wheels in this tarball are
-                           cp311 manylinux2014_x86_64)
+  - Python >= 3.11        (any minor; 3.11 / 3.12 / 3.13 all work — pip
+                           picks the right wheels for whichever you have)
   - Node 18+              (only for serving the prebuilt frontend)
-  - Desktop environment + ability to reach https://notebooklm.google.com
-    and https://cdn.playwright.dev (for scripts/login.sh later)
+  - Outbound HTTPS to pypi.org + cdn.playwright.dev (deploy.sh downloads
+    Python deps + Chromium browser, ~150MB total)
+  - Desktop environment + outbound HTTPS to notebooklm.google.com
+    (for scripts/login.sh later)
 
-Override the Python interpreter with PYTHON_BIN=/path/to/python3.11 if you
-have multiple versions installed and `python3` resolves to the wrong one.
+Override Python with PYTHON_BIN=/path/to/python if needed.
 ============================================================
 EOF
 
 # -- Preflight ------------------------------------------------------------
-# Find python3.11 specifically. We DELIBERATELY don't fall back to python3.12
-# or whatever `python3` happens to be: pack.sh produces wheels locked to
-# cp311 manylinux2014, so an offline deploy on 3.12 would crash with
-# ABI-mismatch errors. Keeping dev and deploy hosts on the same minor version
-# (3.11) also eliminates a class of "works on my machine" bugs.
-#
-# Operators who really want to use a different 3.11+ interpreter can override
-# with PYTHON_BIN=/full/path/to/whatever — we'll honour that and trust them.
-find_python311() {
+# Find a Python >= 3.11. Any minor version is fine — we install online from
+# PyPI, so pip auto-selects wheels matching the local interpreter.
+check_py_ver() {
+    "$1" -c 'import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)' 2>/dev/null
+}
+find_python() {
     if [ -n "${PYTHON_BIN:-}" ]; then
-        if "$PYTHON_BIN" -c 'import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)' 2>/dev/null; then
+        if check_py_ver "$PYTHON_BIN"; then
             echo "$PYTHON_BIN"; return 0
         fi
         echo "ERROR: PYTHON_BIN=$PYTHON_BIN does not point at Python >= 3.11" >&2
         return 1
     fi
-    if command -v python3.11 >/dev/null 2>&1 \
-       && python3.11 -c 'import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)' 2>/dev/null; then
-        echo "python3.11"; return 0
-    fi
+    for cand in python3.13 python3.12 python3.11 python3; do
+        if command -v "$cand" >/dev/null 2>&1 && check_py_ver "$cand"; then
+            echo "$cand"; return 0
+        fi
+    done
     return 1
 }
 
-# Detect distro family (debian / rhel / suse / other) so we can suggest the
-# right `apt`/`dnf`/`zypper` command when something's missing.
-detect_distro() {
-    if [ -r /etc/os-release ]; then
-        # shellcheck disable=SC1091
-        . /etc/os-release
-        for tag in "${ID:-}" ${ID_LIKE:-}; do
-            case "$tag" in
-                debian|ubuntu) echo "debian"; return ;;
-                rhel|centos|rocky|almalinux|fedora) echo "rhel"; return ;;
-                suse|opensuse|opensuse-leap|opensuse-tumbleweed|sles) echo "suse"; return ;;
-            esac
-        done
-    fi
-    echo "other"
-}
+PY=$(find_python) || {
+    cat >&2 <<EOF
+ERROR: no Python >= 3.11 found on this host.
 
-DISTRO=$(detect_distro)
+  Install one for your distro:
+    Ubuntu/Debian:  sudo apt install -y python3 python3-venv    # (3.12 ships with 24.04; 3.11 with 22.04 via deadsnakes)
+    RHEL/CentOS 9:  sudo dnf install -y python3.11              # (venv module is bundled, no -venv subpkg needed)
+    openSUSE/SLES:  sudo zypper install -y python311 python311-venv
 
-# Distro-specific hint for installing python3.11 (and its venv module where
-# the distro splits venv into a separate package, i.e. Debian/Ubuntu).
-# Printed only when find_python311 fails.
-print_python311_install_hint() {
-    case "$DISTRO" in
-        debian)
-            echo "       Ubuntu 22.04+ / Debian 12+ ship python3.11 (Debian 12) or via deadsnakes PPA:"
-            echo "         sudo add-apt-repository ppa:deadsnakes/ppa && sudo apt update"
-            echo "         sudo apt install -y python3.11 python3.11-venv"
-            echo ""
-            echo "       (You may have python3.12 system-wide on Ubuntu 24.04, but this project pins"
-            echo "       cp311 wheel ABI — pack.sh's offline wheels won't install on a 3.12 venv.)"
-            ;;
-        rhel)
-            echo "       RHEL 9 / CentOS Stream 9 / Rocky 9 / AlmaLinux 9 ship 3.11 in default AppStream:"
-            echo "         sudo dnf install -y python3.11"
-            echo "       (venv module is bundled with python3.11 — no separate -venv package needed)"
-            ;;
-        suse)
-            echo "       openSUSE / SLES:"
-            echo "         sudo zypper install -y python311 python311-venv"
-            ;;
-        *)
-            echo "       Distro not detected. Install python3.11 via your package manager"
-            echo "       or pyenv (https://github.com/pyenv/pyenv)."
-            ;;
-    esac
-    echo ""
-    echo "       If python3.11 is installed at a non-PATH location, point at it directly:"
-    echo "         PYTHON_BIN=/full/path/to/python3.11 bash $0"
-}
-
-PY=$(find_python311) || {
-    echo "ERROR: need Python >= 3.11 to create the venv (detected distro: $DISTRO)" >&2
-    print_python311_install_hint >&2
+  Then re-run:  bash $0
+  Or, if your Python lives somewhere outside \$PATH:
+    PYTHON_BIN=/full/path/to/python3 bash $0
+EOF
     exit 1
 }
 command -v node >/dev/null 2>&1 || {
-    case "$DISTRO" in
-        debian) echo "ERROR: node not found — sudo apt install -y nodejs (or use NodeSource for Node 18+)" >&2 ;;
-        rhel)   echo "ERROR: node not found — sudo dnf module install -y nodejs:20  (or use NodeSource)" >&2 ;;
-        suse)   echo "ERROR: node not found — sudo zypper install -y nodejs20" >&2 ;;
-        *)      echo "ERROR: node not found — install Node 18+ via your package manager" >&2 ;;
-    esac
+    echo "ERROR: node not found." >&2
+    echo "       Install Node 18+ via your package manager (apt/dnf/zypper) or NodeSource." >&2
+    exit 1
+}
+command -v rsync >/dev/null 2>&1 || {
+    echo "ERROR: rsync not found (required to sync source into the install path)." >&2
+    echo "       Ubuntu/Debian: sudo apt install -y rsync" >&2
+    echo "       RHEL/CentOS:   sudo dnf install -y rsync" >&2
     exit 1
 }
 
@@ -145,43 +117,41 @@ PY_VER="$("$PY" -c 'import sys; print("{}.{}".format(*sys.version_info[:2]))')"
 echo "✓ $PY $PY_VER ($("$PY" -c 'import sys; print(sys.executable)'))"
 echo "✓ node $(node -v)"
 
-# Choose install mode based on what's actually available, instead of forcing
-# the operator to pick the right script. Same `bash scripts/deploy.sh` works
-# from the source repo (no wheels, but has internet) AND from the tarball
-# (wheels present, may be airgapped):
-#   - wheels/ present + non-empty  → offline install from those wheels
-#   - wheels/ missing + PyPI reachable → online install from PyPI
-#   - neither                       → fail with a fix-it hint
-if [ -d wheels ] && ls wheels/*.whl >/dev/null 2>&1; then
-    INSTALL_MODE=offline
-    WHEEL_COUNT=$(ls wheels/*.whl 2>/dev/null | wc -l)
-    echo "✓ offline mode (found $WHEEL_COUNT wheel files in wheels/)"
-elif "$PY" -c "import urllib.request, socket; socket.setdefaulttimeout(8); urllib.request.urlopen('https://pypi.org/simple/notebooklm-py/').read(1)" 2>/dev/null; then
-    INSTALL_MODE=online
-    echo "✓ online mode (no wheels/, but PyPI is reachable)"
+# -- Sync source into the fixed install path ------------------------------
+# Skip rsync if $HERE already IS $INSTALL_HOME (user re-running deploy.sh
+# from inside their install directory — common during upgrade testing).
+# Use realpath so symlinks / relative paths don't trick the comparison.
+mkdir -p "$INSTALL_HOME"
+HERE_REAL=$(realpath "$HERE")
+INSTALL_REAL=$(realpath "$INSTALL_HOME")
+if [ "$HERE_REAL" = "$INSTALL_REAL" ]; then
+    echo "→ Already in install path ($INSTALL_HOME); source sync skipped"
 else
-    echo "" >&2
-    echo "ERROR: cannot install backend — neither offline nor online path is available." >&2
-    echo "       • wheels/ is missing or empty (no offline install possible)" >&2
-    echo "       • PyPI (https://pypi.org) is not reachable within 8s either" >&2
-    echo "" >&2
-    echo "       Fix one of these:" >&2
-    echo "         → Get an offline tarball from a machine with internet:" >&2
-    echo "             (on dev machine)  bash scripts/pack.sh" >&2
-    echo "             scp dist/notebooklm-bridge-vX.Y.Z.tar.gz this-host:~" >&2
-    echo "             tar -xzf notebooklm-bridge-vX.Y.Z.tar.gz && cd notebooklm-bridge-vX.Y.Z" >&2
-    echo "             bash deploy.sh" >&2
-    echo "         → Or point pip at an internal PyPI mirror, then re-run:" >&2
-    echo "             mkdir -p ~/.pip && echo -e '[global]\nindex-url = https://your-mirror/simple/' >> ~/.pip/pip.conf" >&2
-    exit 1
+    echo "→ Syncing source $HERE → $INSTALL_HOME"
+    # --delete-after removes files from $INSTALL_HOME that no longer exist in
+    # the new source (e.g. when v2.1 deletes a backend module that v2.0 had).
+    # Exclusions: runtime/state assets that must survive across versions.
+    rsync -a --delete-after \
+        --exclude='secrets/' \
+        --exclude='.env' \
+        --exclude='state.json' \
+        --exclude='.venv/' \
+        --exclude='.runtime-ports.json' \
+        --exclude='.backend.pid' --exclude='.frontend.pid' \
+        --exclude='.backend.log' --exclude='.frontend.log' \
+        --exclude='__pycache__' \
+        --exclude='.pytest_cache' --exclude='.mypy_cache' --exclude='.ruff_cache' \
+        --exclude='dist/' \
+        --exclude='.git/' \
+        --exclude='node_modules/' \
+        "$HERE"/ "$INSTALL_HOME"/
 fi
+cd "$INSTALL_HOME"
 
-# -- venv + offline pip install -------------------------------------------
+# -- venv + online pip install --------------------------------------------
 # Detect a broken .venv (directory exists but bin/pip missing / non-executable).
 # Common causes: an interrupted earlier `python -m venv` run, a venv created
-# `--without-pip`, or carrying over a .venv from a different distro. If we
-# just check `-d .venv` and skip creation, the pip step below fails with a
-# useless "no such file or directory". Detect and rebuild instead.
+# `--without-pip`, or carrying over a .venv from a different distro / Python.
 if [ -d .venv ] && [ ! -x .venv/bin/pip ]; then
     echo "→ Found broken .venv (no working pip inside); removing for clean re-create"
     rm -rf .venv
@@ -192,64 +162,71 @@ if [ ! -d .venv ]; then
     # On Debian/Ubuntu the venv module ships in a separate apt package
     # (python3.X-venv). If it's missing, `python -m venv` prints a useful
     # hint but then exits non-zero — set -e would otherwise terminate the
-    # script with no further context. Catch it explicitly and print a
-    # distro-tailored fix.
+    # script with no further context. Catch it explicitly and give a hint.
     if ! "$PY" -m venv .venv; then
-        echo "" >&2
         PY_MINOR=$("$PY" -c 'import sys; print(sys.version_info.minor)' 2>/dev/null || echo "?")
-        echo "ERROR: '$PY -m venv .venv' failed (see Python's message above)." >&2
-        case "$DISTRO" in
-            debian)
-                echo "" >&2
-                echo "  → On Debian/Ubuntu the venv module ships separately. Install it:" >&2
-                echo "      sudo apt install -y python3.${PY_MINOR}-venv" >&2
-                echo "    Then re-run:  bash $0" >&2
-                ;;
-            rhel)
-                echo "" >&2
-                echo "  → On RHEL/CentOS/Rocky/Alma the venv module is bundled with python3.11," >&2
-                echo "    so this failure is unusual. Try reinstalling:" >&2
-                echo "      sudo dnf reinstall -y python3.11" >&2
-                ;;
-            suse)
-                echo "" >&2
-                echo "  → On openSUSE/SLES:  sudo zypper install -y python311-base" >&2
-                ;;
-            *)
-                echo "" >&2
-                echo "  → Install the venv module for your Python distribution and re-run." >&2
-                ;;
-        esac
+        cat >&2 <<EOF
+
+ERROR: '$PY -m venv .venv' failed (see Python's message above).
+
+  Most likely the venv module isn't installed for your Python:
+    Ubuntu/Debian:  sudo apt install -y python3.${PY_MINOR}-venv
+    RHEL/CentOS:    sudo dnf reinstall -y python3.11             # (venv is bundled; reinstall usually fixes)
+    openSUSE/SLES:  sudo zypper install -y python311-base
+
+  Then re-run:  bash $0
+EOF
         exit 1
     fi
+else
+    echo "✓ Reusing existing .venv at $INSTALL_HOME/.venv"
 fi
 echo "→ Upgrading pip (this can be slow on a constrained network — pip's own progress will print)"
 .venv/bin/pip install --upgrade pip
-if [ "$INSTALL_MODE" = "offline" ]; then
-    echo "→ Installing backend from wheels/ (offline)"
-    .venv/bin/pip install --no-index --find-links wheels/ \
-        fastapi 'uvicorn[standard]' pydantic pydantic-settings httpx \
-        'notebooklm-py[browser,cookies]'
-    .venv/bin/pip install --no-build-isolation --no-deps -e .
-else
-    # Online: let pip resolve everything from PyPI via the package's
-    # [runtime] extra (which pins notebooklm-py[browser,cookies]==0.4.1).
-    # Output is NOT quieted — on slow / proxied networks the install can take
-    # several minutes; seeing pip's per-package progress is the only way the
-    # operator knows it's actually working and not hung.
-    echo "→ Installing backend from PyPI (online; expect a few minutes on slow networks)"
-    .venv/bin/pip install -e '.[runtime]'
-fi
+
+# Install backend via the [runtime] extra (which pins
+# notebooklm-py[browser,cookies]==0.4.1 + playwright + rookiepy).
+# Output is NOT quieted — on slow / proxied networks the install can take
+# several minutes; seeing pip's per-package progress is the only way the
+# operator knows it's working and not hung.
+echo "→ Installing backend from PyPI (online; expect a few minutes on slow networks)"
+.venv/bin/pip install -e '.[runtime]'
 echo "✓ Backend installed"
+
+# -- Playwright Chromium ---------------------------------------------------
+# notebooklm-py's CLI uses playwright under the hood to pop a browser window
+# during `notebooklm login`. The Python `playwright` package is installed via
+# the [runtime] extra above, but the actual Chromium browser binary is a
+# separate ~150MB download from cdn.playwright.dev. `playwright install
+# chromium` is idempotent — if the binary's already present it just prints
+# "is already installed" and exits 0.
+#
+# Pre-v2.0 we left this to login.sh's "first run will fetch" hint, but that
+# was based on a wrong assumption: notebooklm-py's CLI does NOT auto-fetch
+# Chromium, it just crashes with BrowserError. So login.sh would fail every
+# time on a fresh install. Doing it here in deploy.sh means login.sh always
+# has the browser available.
+echo "→ Installing Playwright Chromium (~150MB one-time download; skipped if already present)"
+if ! .venv/bin/playwright install chromium; then
+    cat >&2 <<EOF
+
+ERROR: playwright install chromium failed.
+
+  Most common cause: outbound network to cdn.playwright.dev is blocked or
+  unstable. Re-run deploy.sh, or manually:
+    cd $INSTALL_HOME
+    .venv/bin/playwright install chromium
+EOF
+    exit 1
+fi
+echo "✓ Playwright Chromium ready"
 
 # -- secrets/ directory ---------------------------------------------------
 mkdir -p secrets
 chmod 700 secrets
 
 # -- .env -----------------------------------------------------------------
-# v1.0.3 removed the shared-secret authentication, so .env no longer needs
-# operator-supplied credentials. We still copy the template in case the
-# operator wants to tweak the rate-limit / circuit-breaker knobs.
+# Preserve existing .env across upgrades (rsync excluded it, but double-check).
 if [ ! -f .env ]; then
     cp .env.example .env
     echo "→ Created .env from .env.example"
@@ -267,15 +244,18 @@ else
     echo "✓ secrets/auth.json present (mode 600)"
 fi
 
-cat <<'EOF'
+cat <<EOF
 
 ============================================================
 ✓ Install complete. Next:
 
+  cd $INSTALL_HOME
+
   1. Sign in to NotebookLM with your Google account:
        bash scripts/login.sh
      (This pops a Chromium window; sign in, open your target notebook
-      once, then close the browser.)
+      once, then close the browser. Skip if upgrading and cookies still
+      valid — check with curl on /api/healthz.)
 
   2. Start the bridge:
        bash scripts/start-web.sh          # binds 0.0.0.0 (LAN)

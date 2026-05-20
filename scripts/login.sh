@@ -108,9 +108,14 @@ chrome_missing_libs() {
 }
 
 if [ -z "$CHROME_BIN" ]; then
-    # Playwright's Chromium binary is downloaded on first use. Warn the user
-    # so they're not surprised when the next step takes a minute or two.
-    ok "Playwright Chromium not yet downloaded; the first 'notebooklm login' will fetch it (~150MB from cdn.playwright.dev)."
+    # notebooklm-py's CLI does NOT auto-fetch the Chromium binary on first
+    # use — it just crashes with BrowserError. So if we hit this branch
+    # something went wrong in deploy.sh (which should have run
+    # `playwright install chromium`). Fail fast with the correct fix-up
+    # command — don't pretend the next step will work.
+    fail "Playwright Chromium binary not found under ~/.cache/ms-playwright/.
+       deploy.sh should have downloaded it. Re-run deploy.sh, or manually:
+         $VENV/bin/playwright install chromium"
 else
     MISSING=$(chrome_missing_libs)
     if [ -n "$MISSING" ]; then
@@ -156,10 +161,11 @@ else
                 INSTALL_CMD=(sudo zypper install -y)
                 ;;
             other)
-                warn "Unknown distro (no /etc/os-release ID match). Can't auto-install Chromium deps."
+                warn "Unknown distro (no /etc/os-release ID match). Can't auto-install Chromium system libs."
                 echo ""
-                echo "    Try Playwright's own installer (knows more distros than we do):"
-                echo "      sudo $VENV/bin/playwright install-deps chromium"
+                echo "    Try Playwright's own installer for system libs (knows more distros than we do):"
+                echo "      sudo $VENV/bin/playwright install-deps chromium    # NB: install-deps = system libs (libnss3 etc),"
+                echo "                                                         #     NOT the Chromium binary (deploy.sh handled that)"
                 echo "    or see docs/cookie-refresh-runbook.md for the manual lib list."
                 fail "Install the deps yourself and re-run scripts/login.sh."
                 ;;
@@ -181,7 +187,16 @@ else
         if [ -n "$STILL_MISSING" ]; then
             warn "Still missing after install:"
             echo "$STILL_MISSING" | sed 's/^/      /' >&2
-            fail "Chromium still can't load. Try: sudo $VENV/bin/playwright install-deps chromium (or see docs/cookie-refresh-runbook.md)."
+            cat >&2 <<EOF
+Chromium still can't load. Two different "playwright install" commands here:
+  $VENV/bin/playwright install chromium           — downloads the browser binary
+                                                    (deploy.sh already did this;
+                                                    re-run only if the binary's broken)
+  sudo $VENV/bin/playwright install-deps chromium — installs system libs
+                                                    (this is what we just tried;
+                                                    if it still fails, see docs/cookie-refresh-runbook.md)
+EOF
+            fail "Could not fix Chromium's system libs."
         fi
         ok "Chromium deps installed and verified ($DISTRO family)"
     else
