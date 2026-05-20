@@ -6,10 +6,13 @@
 import type {
   ChatRequest,
   ChatResponse,
+  ConvMeta,
   HealthResponse,
+  HistoryEntry,
   Notebook,
   Source,
   SourceFulltext,
+  TurnRecord,
 } from "./types";
 
 /**
@@ -118,6 +121,37 @@ export const api = {
     const res = await fetch(
       `${API_BASE}/chat/select?notebook_id=${encodeURIComponent(notebook_id)}&conversation_id=${encodeURIComponent(conversation_id)}`,
       { method: "POST", headers: authHeaders() }
+    );
+    if (!res.ok && res.status !== 204) {
+      throw new ApiError(res.status, await readErrorMessage(res));
+    }
+  },
+
+  // History was moved from browser localStorage to the bridge backend so the
+  // same X-User-Id sees the same conversation log from any browser. The wire
+  // shape is ConvMeta (no notebook_id); we patch the notebook_id back on for
+  // the caller so App.tsx's existing HistoryEntry-shaped state stays unchanged.
+  getHistory: async (notebook_id: string): Promise<HistoryEntry[]> => {
+    const metas = await request<ConvMeta[]>(
+      `/history?notebook_id=${encodeURIComponent(notebook_id)}`
+    );
+    return metas.map((m) => ({
+      notebook_id,
+      conversation_id: m.conversation_id,
+      first_question: m.first_question,
+      ts: m.ts,
+    }));
+  },
+
+  getTurns: (conversation_id: string) =>
+    request<TurnRecord[]>(
+      `/history/${encodeURIComponent(conversation_id)}/turns`
+    ),
+
+  clearHistory: async (notebook_id: string): Promise<void> => {
+    const res = await fetch(
+      `${API_BASE}/history?notebook_id=${encodeURIComponent(notebook_id)}`,
+      { method: "DELETE", headers: authHeaders() }
     );
     if (!res.ok && res.status !== 204) {
       throw new ApiError(res.status, await readErrorMessage(res));

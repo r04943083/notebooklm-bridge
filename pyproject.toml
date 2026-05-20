@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "notebooklm-bridge"
-version = "2.0.4"
+version = "2.0.5"
 description = "Internal HTTP + web bridge sharing one Google account's NotebookLM with an intranet team."
 requires-python = ">=3.11"
 readme = "README.md"

@@ -73,3 +73,18 @@ export interface HistoryEntry {
   first_question: string;
   ts: number;
 }
+
+// Server-side (no notebook_id — that's a query param on the GET).
+export interface ConvMeta {
+  conversation_id: string;
+  first_question: string;
+  ts: number;
+}
+
+// Server-side (no conversation_id — that's a path param on the GET).
+export interface TurnRecord {
+  turn: number;
+  question: string;
+  answer: string;
+  citations: Citation[];
+}

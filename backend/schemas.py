@@ -35,6 +35,19 @@ class ChatResponse(BaseModel):
     turn: int
 
 
+class ConvMeta(BaseModel):
+    conversation_id: str
+    first_question: str
+    ts: int  # wall-clock epoch ms; UI sort order only
+
+
+class TurnRecord(BaseModel):
+    turn: int
+    question: str
+    answer: str
+    citations: list[Citation]
+
+
 class Notebook(BaseModel):
     id: str
     title: str

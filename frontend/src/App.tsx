@@ -22,55 +22,16 @@ import {
 import type { ChatTurn, HistoryEntry, Notebook, Source } from "@/types";
 
 // ---------------------------------------------------------------------------
-// localStorage key builders. Every per-user piece of state is namespaced by
-// `:<user_id>` so multiple internal users sharing one browser don't see each
-// other's history, turns, or current notebook. `nblm_user_id` itself stays
-// un-namespaced because it's the pointer to "who is logged in right now".
+// localStorage key builders. Chat history (the conversation list + the turns
+// inside each conversation) moved to the bridge backend in v2.0.5, so the
+// same X-User-Id sees the same history from any browser. Only UI prefs stay
+// here:
+//   - `nblm_user_id`              global "who is logged in" pointer
+//   - `nblm_notebook_id:<uid>`    last-opened notebook for this user
+//   - `nblm_active_cid:<uid>`     dead key from an older build, cleaned up on mount
 // ---------------------------------------------------------------------------
-const HISTORY_LIMIT = 20;
-const historyKey = (uid: string) => `nblm_history:${uid}`;
 const notebookKey = (uid: string) => `nblm_notebook_id:${uid}`;
-const turnsKey = (uid: string, cid: string) => `nblm_turns:${uid}:${cid}`;
 const activeCidKey = (uid: string) => `nblm_active_cid:${uid}`;
-
-function loadHistory(uid: string): HistoryEntry[] {
-  try {
-    const raw = localStorage.getItem(historyKey(uid));
-    return raw ? (JSON.parse(raw) as HistoryEntry[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveHistory(uid: string, entries: HistoryEntry[]): void {
-  localStorage.setItem(
-    historyKey(uid),
-    JSON.stringify(entries.slice(-HISTORY_LIMIT))
-  );
-}
-
-/** localStorage roundtrip for chat turns, keyed by (user_id, conversation_id)
- *  so the same conversation looks the same across notebook switches and page
- *  reloads, and never leaks across user_id boundaries. */
-function loadTurns(uid: string, conversationId: string): ChatTurn[] {
-  try {
-    const raw = localStorage.getItem(turnsKey(uid, conversationId));
-    return raw ? (JSON.parse(raw) as ChatTurn[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function appendTurn(uid: string, conversationId: string, turn: ChatTurn): void {
-  const cur = loadTurns(uid, conversationId);
-  cur.push(turn);
-  try {
-    localStorage.setItem(turnsKey(uid, conversationId), JSON.stringify(cur));
-  } catch {
-    // QuotaExceededError or storage disabled — drop silently; the user still
-    // sees the turn in memory for this session.
-  }
-}
 
 export default function App() {
   // `userId` is bootstrapped from localStorage on mount. UserPrompt /
@@ -95,9 +56,7 @@ export default function App() {
   const [sourcesLoading, setSourcesLoading] = useState(false);
   const [sourcesError, setSourcesError] = useState<string | null>(null);
 
-  const [history, setHistory] = useState<HistoryEntry[]>(() =>
-    loadHistory(userId)
-  );
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
 
   // Tracks "which conversation the user explicitly picked from the History
   // popover", NOT "which cid is in-flight on the backend". Starts `null` on
@@ -196,6 +155,27 @@ export default function App() {
     };
   }, [notebookId, userId]);
 
+  // Load history for the current (user, notebook) from the bridge. paneEpoch
+  // is included so handleClearNotebookHistory's bumpPane() triggers a refresh
+  // and the popover stays aligned with backend truth after a clear.
+  useEffect(() => {
+    if (!userId || !notebookId) {
+      setHistory([]);
+      return;
+    }
+    let alive = true;
+    api
+      .getHistory(notebookId)
+      .then((entries) => alive && setHistory(entries))
+      .catch((e: Error) => {
+        // eslint-disable-next-line no-console
+        console.warn("getHistory failed:", e.message);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [userId, notebookId, paneEpoch]);
+
   /** User-driven notebook switch via the TopBar picker. Clears the active
    *  conversation because a different notebook's cid is meaningless and would
    *  confuse the next /api/chat call. */
@@ -213,35 +193,33 @@ export default function App() {
     (turn: ChatTurn) => {
       const cid = turn.response.conversation_id;
       if (!cid) return;
-      // Persist the actual conversation content so that a future history-click
-      // (or reload) can rehydrate the turns list, not just the notebook.
-      appendTurn(userId, cid, turn);
+      // The backend already persisted this turn (POST /api/chat → store.append_turn);
+      // this in-memory history update is just so the popover reflects the new
+      // conversation immediately in the current session without a refetch.
+      //
       // Deliberately do NOT touch `activeConversationId` here. Doing so would
       // change the ChatPane key (`...|${activeConversationId ?? "fresh"}|...`),
       // unmount the pane, and a fresh instance would initialise from
       // `initialTurns=[]` — wiping the answer the user is currently looking at.
-      // The turn is already in `turnsKey(uid, cid)` and the history entry below
-      // makes it reachable from the History popover, so we don't lose anything.
       setHistory((prev) => {
         const existing = prev.find((h) => h.conversation_id === cid);
-        const next = existing
-          ? prev.map((h) =>
-              h.conversation_id === cid ? { ...h, ts: Date.now() } : h
-            )
-          : [
-              ...prev,
-              {
-                notebook_id: notebookId,
-                conversation_id: cid,
-                first_question: turn.question,
-                ts: Date.now(),
-              },
-            ];
-        saveHistory(userId, next);
-        return next;
+        if (existing) {
+          return prev.map((h) =>
+            h.conversation_id === cid ? { ...h, ts: Date.now() } : h
+          );
+        }
+        return [
+          ...prev,
+          {
+            notebook_id: notebookId,
+            conversation_id: cid,
+            first_question: turn.question,
+            ts: Date.now(),
+          },
+        ];
       });
     },
-    [notebookId, userId]
+    [notebookId]
   );
 
   const handleSelectHistory = useCallback(
@@ -253,46 +231,51 @@ export default function App() {
       try {
         await api.selectConversation(entry.notebook_id, entry.conversation_id);
       } catch (e) {
-        // Don't block the UI restore on backend errors; the user can still see
-        // the turns. They'll get a real error on the next ask if needed.
         // eslint-disable-next-line no-console
         console.warn("selectConversation failed:", (e as Error).message);
       }
-      const restored = loadTurns(userId, entry.conversation_id);
-      // Set conversation state AFTER setNotebookId so React batches them
-      // together — but the source-fetch effect no longer resets these (see
-      // the comment in that effect), so order is no longer load-bearing.
+      // Pull the stored turns from the bridge — same X-User-Id sees the same
+      // turns from any browser.
+      let restored: ChatTurn[] = [];
+      try {
+        const trs = await api.getTurns(entry.conversation_id);
+        restored = trs.map((tr) => ({
+          question: tr.question,
+          response: {
+            answer: tr.answer,
+            citations: tr.citations,
+            conversation_id: entry.conversation_id,
+            turn: tr.turn,
+          },
+        }));
+      } catch (e) {
+        // 404 here = the conversation was cleared on the server side; fall
+        // through with restored=[] so the pane just opens empty.
+        // eslint-disable-next-line no-console
+        console.warn("getTurns failed:", (e as Error).message);
+      }
       setNotebookId(entry.notebook_id);
       setActiveConversationId(entry.conversation_id);
       setInitialTurns(restored);
     },
-    [userId]
+    []
   );
 
   /** Wipe every saved conversation under the given notebook for the current
-   *  user: removes the matching history entries, drops each conversation's
-   *  turnsKey, calls /chat/reset so the backend forgets its current cid, and
-   *  clears the live pane. The History popover hands this its `notebookId`
+   *  user. The bridge's DELETE /api/history clears the conversation list, the
+   *  per-cid turns, AND the session pointer — so we don't need a separate
+   *  /api/chat/reset here. The History popover hands this its `notebookId`
    *  so other notebooks' history stays put. */
   const handleClearNotebookHistory = useCallback(
     async (nbId: string) => {
-      const victims = history.filter((h) => h.notebook_id === nbId);
-      for (const h of victims) {
-        try {
-          localStorage.removeItem(turnsKey(userId, h.conversation_id));
-        } catch {
-          // ignore — best-effort
-        }
-      }
-      const next = history.filter((h) => h.notebook_id !== nbId);
-      saveHistory(userId, next);
-      setHistory(next);
       try {
-        await api.resetChat(nbId);
+        await api.clearHistory(nbId);
       } catch (e) {
         // eslint-disable-next-line no-console
-        console.warn("resetChat during clear failed:", (e as Error).message);
+        console.warn("clearHistory failed:", (e as Error).message);
+        return;
       }
+      setHistory((prev) => prev.filter((h) => h.notebook_id !== nbId));
       if (nbId === notebookId) {
         setActiveConversationId(null);
         setInitialTurns([]);
@@ -303,7 +286,7 @@ export default function App() {
         bumpPane();
       }
     },
-    [bumpPane, history, notebookId, userId]
+    [bumpPane, notebookId]
   );
 
   const handleNewConversation = useCallback(async () => {

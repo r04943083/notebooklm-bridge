@@ -29,6 +29,7 @@ from .config import get_settings
 from .logging_conf import setup_logging
 from .routes import chat as chat_route
 from .routes import health as health_route
+from .routes import history as history_route
 from .routes import notebooks as notebooks_route
 from .routes import sources as sources_route
 from .store import Store
@@ -117,7 +118,7 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=[cfg.internal_frontend_origin],
         allow_credentials=False,
-        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
         allow_headers=["Content-Type", "X-User-Id"],
     )
 
@@ -125,6 +126,7 @@ def create_app() -> FastAPI:
     application.include_router(notebooks_route.router, prefix="/api")
     application.include_router(sources_route.router, prefix="/api")
     application.include_router(chat_route.router, prefix="/api")
+    application.include_router(history_route.router, prefix="/api")
     return application
 
 

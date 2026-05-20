@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.5] — 2026-05-20
+
+chat history(对话列表 + 每个对话的 turns 内容)从浏览器 localStorage 搬到
+bridge 后端。同一个 `X-User-Id` 跨浏览器 / 跨部署看到同一份历史 —— 比如
+"内网 luyh" 和 "外网 luyh" 之前各看各的,现在指向同一台 bridge 时合并。
+
+### Added
+
+- **`GET /api/history?notebook_id=...`** — 列出 (user, notebook) 的会话,
+  最近活跃在前
+- **`GET /api/history/{conversation_id}/turns`** — 拉取一个会话的所有 turn
+  (question / answer / citations);跨用户访问统一返回 404,防 cid 枚举
+- **`DELETE /api/history?notebook_id=...`** — 一把清掉该 (user, notebook)
+  的所有 conversation、对应 turns、以及 session cid 指针(原 `/api/chat/reset`
+  在"清历史"流程中不再需要)
+
+### Changed
+
+- `POST /api/chat` 在 ask 成功后,除了原来的 `set_session(cid)` 外,**同步把
+  本轮 (question, answer, citations, turn) 写入 store 的 history / turns**。
+  纯内存操作 + 后台 debounce flush,不阻塞请求
+- `state.json` schema 升级 v1 → v2:新增 `histories` / `turns` 两个 dict。
+  `Store.load` 自动识别 v1 文件,把新字段留空,下次 flush 自动写成 v2,**不
+  迁移旧浏览器里的 localStorage history**
+- 每 (user, notebook) 上限 **20 条 conversation**,超过按"最久未活跃"丢
+  (沿用现有 README 约定)。被丢的 conversation 的 turns 跟着 evict
+- `/api/chat/reset` 语义保持不变:**只清 cid 指针、不清 history**,符合"开
+  始新对话但旧对话仍可点回去"的 UX
+
+### Frontend
+
+- 删掉 `frontend/src/App.tsx` 的 `historyKey` / `turnsKey` / `loadHistory` /
+  `saveHistory` / `loadTurns` / `appendTurn` 这一整套 localStorage 工具。
+  history popover 改为在 (userId, notebookId) 变化时 `fetch /api/history`,
+  点击某条历史改为 `fetch /api/history/{cid}/turns`,清历史改为 `DELETE
+  /api/history`
+- 旧浏览器里残留的 `nblm_history:<uid>` / `nblm_turns:<uid>:<cid>` 不会被
+  自动清理,但页面也不会再读它们(可手动从 DevTools 清掉,或者放着不
+  影响新行为)。保留 `nblm_user_id` 和 `nblm_notebook_id:<uid>`,这俩是
+  UI 偏好不是 history 内容
+- CORS `allow_methods` 新增 `DELETE`,否则浏览器 preflight 会拦 clear
+
 ## [2.0.4] — 2026-05-20
 
 `start-web.sh` 的 backend 启动调用从裸 `uvicorn` 改成 `.venv/bin/uvicorn`

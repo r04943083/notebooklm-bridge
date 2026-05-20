@@ -168,11 +168,29 @@ async def chat(
     references = getattr(result, "references", None)
     if references is None:
         references = getattr(result, "citations", None)
+    citations = _coerce_citations(references)
+    answer = str(getattr(result, "answer", ""))
+    turn_number = int(getattr(result, "turn_number", None) or getattr(result, "turn", 1) or 1)
+
+    # Persist the turn to the bridge-side history so any browser pointing at the
+    # same X-User-Id sees the same conversation log. This is in-memory + a
+    # background-debounced JSON flush; it does not block the request.
+    if new_cid:
+        store.append_turn(
+            user_id=user_id,
+            notebook_id=req.notebook_id,
+            conversation_id=new_cid,
+            question=req.question,
+            answer=answer,
+            citations=[c.model_dump() for c in citations],
+            turn_number=turn_number,
+        )
+
     return ChatResponse(
-        answer=str(getattr(result, "answer", "")),
-        citations=_coerce_citations(references),
+        answer=answer,
+        citations=citations,
         conversation_id=new_cid,
-        turn=int(getattr(result, "turn_number", None) or getattr(result, "turn", 1) or 1),
+        turn=turn_number,
     )
 
 
