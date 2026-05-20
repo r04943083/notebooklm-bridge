@@ -104,8 +104,40 @@ notebooklm-py 的 `NotebookLMClient` 是 "single event loop async re-entrant, no
 1. 改完 → `pytest` 全绿 → `ruff check .` `mypy backend/` 无 error
 2. 前端改动 → `npm run build` 不报错
 3. 端到端验证(plan.md "端到端验证脚本"那一节里的步骤)按当前 Phase 跑通
-4. `git commit` — **先确认 message 里没有任何 AI 署名痕迹**,再提交
-5. PR 描述用第一人称写"我做了什么、为什么、风险点",不出现"Claude 帮我 …"
+4. **版号 patch +1**(下面 §5.1 详细列出哪些文件要同步改;改完后这些
+   文件的 diff 会一起进同一笔 commit)
+5. `git commit` — **先确认 message 里没有任何 AI 署名痕迹**,再提交
+6. `git push origin <current-branch>` — **commit 完自动推**,solo 工作流不
+   走 PR review;如果你确实在 feature branch 且想攒一批再 push,临时跟我说
+   "这次不要 push" 就可以。main 分支强制推。
+7. 如果走 PR(以后多人协作时):PR 描述用第一人称写"我做了什么、为什么、
+   风险点",不出现"Claude 帮我 …"
+
+### 5.1 版号 bump 规则
+
+每次 commit 前 patch +1(`1.0.3 → 1.0.4 → 1.0.5 …`)。**只动以下 6 处**,
+其他 `v1.0.x` 出现的地方全是历史叙事(CHANGELOG 条目、`v1.0.3 dropped X`
+注释、`up to v1.0.2 we required X` 这种)**绝对不要碰**,改了会让代码里的
+变更说明跟历史脱节。
+
+| 文件 | 怎么改 |
+|---|---|
+| `pyproject.toml` | 顶层 `version = "X.Y.Z"`(single source of truth) |
+| `frontend/package.json` | 顶层 `"version": "X.Y.Z"` |
+| `README.md` | `**Status: vX.Y.Z**` 那一行;Quick start / Build sections 里的 `notebooklm-bridge-vX.Y.Z.tar.gz` 和 `cd notebooklm-bridge-vX.Y.Z` 命令例(grep `vX.Y.Z` 即可定位,通常 5-6 处) |
+| `CHANGELOG.md` | 顶部**新增**一条 `## vX.Y.Z — <date>` 段,简述本次改动;旧条目原样保留 |
+
+不要碰:
+- `frontend/package-lock.json`(里面 1.0.x 是第三方依赖版本)
+- 任何叙述性引用("v1.0.3 dropped …"、"up to v1.0.2"、"v1.0.0 deploy bug"
+  等)— 这些是 commit 历史 / 代码注释里对旧版本行为的记录
+- `scripts/pack.sh` 的版本号不在脚本里写死,它会去读 `pyproject.toml`(如果以后改成读 — 也只改读取逻辑,不在脚本里再 hardcode 一份)
+
+bump 时机:**在 `git add` 之前** bump,这样版号改动跟功能改动一起进同一笔
+commit,git log 上每条 commit 都对应一个明确的版本号。
+
+如果当次 commit 只是 typo / 格式 / 注释微调,确实不想 bump → 跟我说"这次不
+bump",我跳过该步骤。但默认行为是 bump。
 
 ---
 

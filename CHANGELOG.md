@@ -5,6 +5,53 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.4] — 2026-05-20
+
+Two operational fixes for hosts with quirky environments + a new "every
+commit bumps patch + auto-push" rule baked into `CLAUDE.md` §5.
+
+### Fixed
+
+- **`scripts/start-web.sh` starting port now auto-increments**. Previous
+  behaviour: the script hard-coded `BACKEND_PORT=8002` on L24, overriding
+  whatever was in `.env`, and exited on conflict. New behaviour: `.env`'s
+  `BACKEND_PORT` / `FRONTEND_PORT` are *starting* ports; the script probes
+  `[start, start+9]` and picks the first free one, writes the chosen pair
+  to `.runtime-ports.json`. `stop-web.sh` / `status-web.sh` / vite's proxy
+  all read from that file. `--force` still only kills processes from this
+  project (won't touch other projects' holders — those just trigger the
+  auto-increment fall-through).
+- **`scripts/deploy.sh` / `scripts/update.sh` venv creation now requires
+  Python ≥ 3.11**, with explicit interpreter probing (`python3.11 →
+  python3.12 → python3`). Fixes the case where the host's default `python3`
+  is 3.9 but `python3.11` is installed side-by-side: `python3 -m venv .venv`
+  would create a 3.9 venv, then pip would refuse to install the bundled
+  cp311 wheels. `PYTHON_BIN=/path/to/python3.11` overrides the probe if
+  python3.11 lives outside `$PATH`.
+
+### Added
+
+- **`CLAUDE.md` §5.1: version bump rule.** Every commit bumps patch +1
+  (`1.0.3 → 1.0.4 → …`) and auto-pushes to origin on main. Lists exactly
+  which 4 files to touch (pyproject.toml + frontend/package.json +
+  README.md + CHANGELOG.md) and which `v1.0.x` strings *not* to touch
+  (CHANGELOG history entries, `v1.0.3 dropped X`-style narrative comments).
+
+### Changed
+
+- `CLAUDE.md` §3.2 rewritten: ports are no longer "pinned 8002 / 5175",
+  they're starting ports with auto-probe.
+- `README.md` Quick start + `scripts/README_DEPLOY.md` §1.1 and §2.1
+  explain `PYTHON_BIN=...` override and the port auto-increment for
+  operators.
+
+### Migration
+
+Drop-in compatible with v1.0.3 deployments — no config changes required
+on existing hosts. If you previously hand-edited `start-web.sh` /
+`vite.config.ts` to change ports, move that change to `.env` instead
+(`BACKEND_PORT` / `FRONTEND_PORT`).
+
 ## [1.0.3] — 2026-05-19
 
 Drops the `X-Shared-Secret` header that v1.0.2 still required. The
