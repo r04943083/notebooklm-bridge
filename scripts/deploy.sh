@@ -15,7 +15,23 @@
 
 set -euo pipefail
 
+# deploy.sh ships at the tarball's top-level directory (pack.sh copies it there
+# from scripts/), but in the source repo it actually lives at scripts/deploy.sh.
+# Auto-locate the project root by looking for pyproject.toml so both invocations
+# work:
+#   ./deploy.sh                  (from inside an unpacked tarball)
+#   ./scripts/deploy.sh          (from inside the source repo)
 HERE="$(cd "$(dirname "$0")" && pwd)"
+if [ ! -f "$HERE/pyproject.toml" ]; then
+    if [ -f "$HERE/../pyproject.toml" ]; then
+        HERE="$(cd "$HERE/.." && pwd)"
+    else
+        echo "ERROR: pyproject.toml not found at $HERE or one level up." >&2
+        echo "       deploy.sh must be invoked from the tarball's top-level directory" >&2
+        echo "       (where pack.sh placed it), or from scripts/ in the source repo." >&2
+        exit 1
+    fi
+fi
 cd "$HERE"
 
 cat <<'EOF'
@@ -126,9 +142,37 @@ PY_VER="$("$PY" -c 'import sys; print("{}.{}".format(*sys.version_info[:2]))')"
 echo "✓ $PY $PY_VER ($("$PY" -c 'import sys; print(sys.executable)'))"
 echo "✓ node $(node -v)"
 
+# wheels/ must exist and be non-empty — this is the one hard difference between
+# deploy.sh (offline install from tarball) and a dev install. Developers running
+# this in the source repo by mistake should hit this early with a clear hint to
+# use setup.sh / pack.sh instead, NOT a downstream "pip: file not found".
+if [ ! -d wheels ] || ! ls wheels/*.whl >/dev/null 2>&1; then
+    echo "" >&2
+    echo "ERROR: wheels/ missing or empty at $HERE." >&2
+    echo "       deploy.sh installs from offline wheels — meant ONLY for the tarball" >&2
+    echo "       produced by scripts/pack.sh, not for the source repo." >&2
+    echo "" >&2
+    echo "  → On the deploy host:  get the tarball from the developer machine first" >&2
+    echo "      tar -xzf notebooklm-bridge-vX.Y.Z.tar.gz" >&2
+    echo "      cd notebooklm-bridge-vX.Y.Z && bash deploy.sh" >&2
+    echo "" >&2
+    echo "  → On the developer machine (dev install, not deploy):" >&2
+    echo "      bash scripts/setup.sh" >&2
+    echo "      # or:  $PY -m venv .venv && .venv/bin/pip install -e '.[runtime,dev]'" >&2
+    exit 1
+fi
+
 # -- venv + offline pip install -------------------------------------------
-# If a stale .venv from an earlier (wrong-version) run exists, the operator
-# can blow it away with `rm -rf .venv` before re-running this script.
+# Detect a broken .venv (directory exists but bin/pip missing / non-executable).
+# Common causes: an interrupted earlier `python -m venv` run, a venv created
+# `--without-pip`, or carrying over a .venv from a different distro. If we
+# just check `-d .venv` and skip creation, the pip step below fails with a
+# useless "no such file or directory". Detect and rebuild instead.
+if [ -d .venv ] && [ ! -x .venv/bin/pip ]; then
+    echo "→ Found broken .venv (no working pip inside); removing for clean re-create"
+    rm -rf .venv
+fi
+
 if [ ! -d .venv ]; then
     echo "→ Creating .venv with $PY"
     "$PY" -m venv .venv

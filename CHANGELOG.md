@@ -5,6 +5,56 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.8] — 2026-05-20
+
+`deploy.sh` / `update.sh` no longer fail with cryptic
+`.venv/bin/pip: No such file or directory` when invoked the "wrong" way
+or finding a broken venv. Triaged from the real failure on the maintainer's
+dev box where `./scripts/deploy.sh` died at line 137. Three root causes
+were all hidden behind that one error:
+
+### Fixed
+
+- **Wrong cwd when invoked from `scripts/`**. Previously `deploy.sh` did
+  `cd "$HERE"` blindly, which lands in `scripts/` if you ran
+  `./scripts/deploy.sh` from the source repo (rather than `bash deploy.sh`
+  from the tarball top-level where pack.sh placed it). With cwd wrong,
+  every later relative path (`wheels/`, `.venv/`, `.env.example`) breaks.
+  Now: auto-locate the project root by looking for `pyproject.toml` at
+  `$HERE` or `$HERE/..`, so both invocations work. Same fix for
+  `update.sh`.
+
+- **`wheels/` missing → cryptic downstream error**. `deploy.sh` is an
+  *offline* installer; running it from the source repo (where pack.sh
+  hasn't yet generated `wheels/`) used to fall through to a confusing
+  `pip` error several seconds in. Now: explicit early check with a
+  multi-line message that distinguishes "you're on the deploy host but
+  forgot the tarball" from "you're on the dev machine — use setup.sh
+  instead". Same check in `update.sh`.
+
+- **Broken `.venv` directories now detected**. If `python -m venv` was
+  interrupted (or, on Ubuntu, ran without `python3.12-venv` package
+  installed), it leaves a `.venv/` with only a `bin/python` symlink and
+  no `pip`. The old `if [ ! -d .venv ]` check skipped re-creation and the
+  next pip step crashed with the now-famous `No such file or directory`.
+  Now: `.venv` is treated as broken (and rebuilt) whenever `.venv/bin/pip`
+  is missing or non-executable. Same fix in `update.sh` for carried-over
+  venvs from a different distro.
+
+### Verified
+
+Actually ran `./scripts/deploy.sh` on the WSL Ubuntu dev box this release:
+- with no `wheels/` → exits 1 with the dev-machine vs. deploy-host hint
+- with empty `wheels/` and the pre-existing broken `.venv` → wheels check
+  catches it, then broken-venv detection runs cleanly when wheels exist
+- with broken venv + wheels present → rebuild attempt runs; surfaces
+  Ubuntu's `apt install python3.12-venv` hint upstream from Python's own
+  ensurepip error when the system venv package isn't installed
+
+Lesson: shell scripts shipped to users *must* be exercised end-to-end on
+the maintainer's machine before release. `bash -n` and unit-testing the
+helper functions in isolation don't catch cwd / glob / set-flag interactions.
+
 ## [1.0.7] — 2026-05-20
 
 Deploy scripts now detect the host distro family (Debian/Ubuntu vs.

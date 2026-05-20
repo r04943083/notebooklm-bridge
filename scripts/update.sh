@@ -8,8 +8,27 @@
 
 set -euo pipefail
 
+# Same project-root detection as deploy.sh — works whether update.sh sits at
+# the tarball top-level (pack.sh's placement) or at scripts/ in the repo.
 HERE="$(cd "$(dirname "$0")" && pwd)"
+if [ ! -f "$HERE/pyproject.toml" ]; then
+    if [ -f "$HERE/../pyproject.toml" ]; then
+        HERE="$(cd "$HERE/.." && pwd)"
+    else
+        echo "ERROR: pyproject.toml not found at $HERE or one level up." >&2
+        echo "       update.sh must be invoked from the tarball top-level dir," >&2
+        echo "       or from scripts/ in the source repo." >&2
+        exit 1
+    fi
+fi
 cd "$HERE"
+
+if [ ! -d wheels ] || ! ls wheels/*.whl >/dev/null 2>&1; then
+    echo "ERROR: wheels/ missing or empty at $HERE." >&2
+    echo "       update.sh reinstalls from offline wheels — needs the wheels/ shipped" >&2
+    echo "       in the tarball produced by scripts/pack.sh." >&2
+    exit 1
+fi
 
 OLD="${1:-}"
 if [ -z "$OLD" ]; then
@@ -73,6 +92,15 @@ find_python311() {
     done
     return 1
 }
+
+# Treat a venv missing pip the same as no venv at all (see deploy.sh for the
+# rationale — interrupted runs / --without-pip / cross-distro carryover all
+# manifest as bin/pip absent, and skipping straight to pip install fails with
+# a confusing "No such file or directory").
+if [ -d .venv ] && [ ! -x .venv/bin/pip ]; then
+    echo "→ Carried-over .venv has no working pip; removing for clean re-create"
+    rm -rf .venv
+fi
 
 if [ ! -d .venv ]; then
     PY=$(find_python311) || {
