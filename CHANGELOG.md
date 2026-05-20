@@ -5,6 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.7] — 2026-05-20
+
+Deploy scripts now detect the host distro family (Debian/Ubuntu vs.
+RHEL/CentOS/Rocky/Alma vs. SUSE) and produce distro-specific error
+messages and install commands. Motivated by the dev box being WSL Ubuntu
+while the IT deploy target is CentOS Stream 9 — previously the scripts
+hard-coded `apt-get` and Ubuntu 24.04 package names, which would have
+failed silently or noisily on the deploy host.
+
+### Added
+
+- **`scripts/login.sh`** Chromium-deps step now branches on the detected
+  distro and picks the right package names:
+  - Debian/Ubuntu: `libnspr4 libnss3 libatk1.0-0t64 …` via `apt-get`
+  - **RHEL family (CentOS 9 / Rocky 9 / Alma 9): `nspr nss atk
+    at-spi2-atk libxshmfence …` via `dnf`** — new
+  - openSUSE/SLES: `mozilla-nspr mozilla-nss …` via `zypper` — new
+  - Unknown distro: falls back to suggesting Playwright's own
+    `playwright install-deps chromium`
+
+  RHEL 9 / Rocky 9 minimal installs hide `libxshmfence` behind the CRB
+  (CodeReady Builder) repo; if `dnf install` reports "No match for
+  argument", the error message tells the operator to enable CRB and
+  retry (`sudo dnf config-manager --set-enabled crb`).
+
+- **`scripts/deploy.sh`** prints a distro-specific Python 3.11 install
+  hint when `find_python311` fails — Ubuntu apt vs. Rocky dnf vs. SUSE
+  zypper. Same treatment for `node not found`. Previously the error was
+  generic: "need Python >= 3.11", which is unhelpful on a CentOS host
+  where the operator might reach for `apt-get` reflexively.
+
+- **`scripts/README_DEPLOY.md` §1.2: "按发行版的具体准备步骤"** — full
+  copy-pasteable steps for Debian/Ubuntu, RHEL 9 family (with CRB
+  caveat), openSUSE, with a fallback for anything else.
+
+### Internal
+
+- Added `detect_distro()` helper to both `deploy.sh` and `login.sh`
+  (inlined, not extracted to a shared lib — bash source-ing across
+  scripts is fragile under `cd "$HERE"`). Reads `/etc/os-release`
+  `ID` + `ID_LIKE` and maps to one of `debian` / `rhel` / `suse` /
+  `other`. Verified on WSL Ubuntu (returns `debian`) and tested with
+  simulated CentOS Stream 9 / Rocky 9 inputs (both return `rhel`).
+
 ## [1.0.6] — 2026-05-20
 
 UX fix: the "credential not ready" 503 error now tells the user what to do

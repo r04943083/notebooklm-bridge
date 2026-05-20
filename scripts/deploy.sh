@@ -58,12 +58,69 @@ find_python311() {
     return 1
 }
 
+# Detect distro family (debian / rhel / suse / other) so we can suggest the
+# right `apt`/`dnf`/`zypper` command when something's missing.
+detect_distro() {
+    if [ -r /etc/os-release ]; then
+        # shellcheck disable=SC1091
+        . /etc/os-release
+        for tag in "${ID:-}" ${ID_LIKE:-}; do
+            case "$tag" in
+                debian|ubuntu) echo "debian"; return ;;
+                rhel|centos|rocky|almalinux|fedora) echo "rhel"; return ;;
+                suse|opensuse|opensuse-leap|opensuse-tumbleweed|sles) echo "suse"; return ;;
+            esac
+        done
+    fi
+    echo "other"
+}
+
+DISTRO=$(detect_distro)
+
+# Distro-specific hint for installing Python 3.11. Printed only when the probe
+# fails — most hosts already have it and don't need to read this.
+print_python311_install_hint() {
+    case "$DISTRO" in
+        debian)
+            echo "       Ubuntu 22.04+ / Debian 12+:"
+            echo "         sudo apt update && sudo apt install -y python3.11 python3.11-venv"
+            echo "       Ubuntu 20.04 needs the deadsnakes PPA first:"
+            echo "         sudo add-apt-repository ppa:deadsnakes/ppa && sudo apt update"
+            echo "         sudo apt install -y python3.11 python3.11-venv"
+            ;;
+        rhel)
+            echo "       RHEL 9 / CentOS Stream 9 / Rocky 9 / AlmaLinux 9:"
+            echo "         sudo dnf install -y python3.11"
+            echo "       (3.11 is in the default AppStream; venv module is bundled — no separate -venv package)"
+            ;;
+        suse)
+            echo "       openSUSE / SLES:"
+            echo "         sudo zypper install -y python311 python311-venv"
+            ;;
+        *)
+            echo "       Distro not detected. Install Python 3.11 via your package manager"
+            echo "       or pyenv (https://github.com/pyenv/pyenv)."
+            ;;
+    esac
+    echo ""
+    echo "       If python3.11 ends up at a non-PATH location, point at it explicitly:"
+    echo "         PYTHON_BIN=/full/path/to/python3.11 bash deploy.sh"
+}
+
 PY=$(find_python311) || {
-    echo "ERROR: need Python >= 3.11 — install python3.11 (e.g. via your distro's package manager)" >&2
-    echo "       or set PYTHON_BIN=/full/path/to/python3.11 and re-run." >&2
+    echo "ERROR: need Python >= 3.11 to create the venv (detected distro: $DISTRO)" >&2
+    print_python311_install_hint >&2
     exit 1
 }
-command -v node >/dev/null 2>&1 || { echo "ERROR: node not found" >&2; exit 1; }
+command -v node >/dev/null 2>&1 || {
+    case "$DISTRO" in
+        debian) echo "ERROR: node not found — sudo apt install -y nodejs (or use NodeSource for Node 18+)" >&2 ;;
+        rhel)   echo "ERROR: node not found — sudo dnf module install -y nodejs:20  (or use NodeSource)" >&2 ;;
+        suse)   echo "ERROR: node not found — sudo zypper install -y nodejs20" >&2 ;;
+        *)      echo "ERROR: node not found — install Node 18+ via your package manager" >&2 ;;
+    esac
+    exit 1
+}
 
 PY_VER="$("$PY" -c 'import sys; print("{}.{}".format(*sys.version_info[:2]))')"
 echo "✓ $PY $PY_VER ($("$PY" -c 'import sys; print(sys.executable)'))"

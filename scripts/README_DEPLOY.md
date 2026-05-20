@@ -39,6 +39,72 @@ PYTHON_BIN=/opt/python3.11/bin/python3.11 bash deploy.sh
 
 `update.sh` 也认同一个环境变量。
 
+### 1.2 按发行版的具体准备步骤
+
+`deploy.sh` 和 `scripts/login.sh` 都会读 `/etc/os-release` 自动识别发行版
+(debian / rhel / suse 三大家),装包时用对应的包管理器 + 包名,失败时给针对性
+错误提示。下面是每个发行版需要操作员**手动**做的事(IT 提前装好这些,deploy 就
+能一路通到底)。
+
+#### Ubuntu 22.04+ / Debian 12+ (apt)
+
+```bash
+sudo apt update
+sudo apt install -y python3.11 python3.11-venv nodejs    # Node 不够新就上 NodeSource
+# Chromium 系统库由 scripts/login.sh 自动检测 + 装
+```
+
+Ubuntu 20.04 的 apt 仓里没有 3.11,先加 deadsnakes PPA:
+
+```bash
+sudo add-apt-repository ppa:deadsnakes/ppa
+sudo apt update
+sudo apt install -y python3.11 python3.11-venv
+```
+
+#### CentOS Stream 9 / RHEL 9 / Rocky 9 / AlmaLinux 9 (dnf)
+
+```bash
+sudo dnf install -y python3.11        # 3.11 在默认 AppStream;venv 模块已内置,无需 -venv 子包
+sudo dnf module install -y nodejs:20  # 或者上 NodeSource:  curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -
+```
+
+**`scripts/login.sh` 装 Chromium 系统库时若报 "No match for argument: libxshmfence"**,
+说明 CRB(CodeReady Builder)仓没启用 — minimal 安装的 RHEL 9 / Rocky 9 默认关
+的。`libxshmfence` 在 CRB 里。一行解决:
+
+```bash
+sudo dnf config-manager --set-enabled crb
+# Rocky/Alma:  sudo dnf config-manager --set-enabled crb
+# RHEL 9:      sudo subscription-manager repos --enable codeready-builder-for-rhel-9-x86_64-rpms
+```
+
+然后重跑 `bash scripts/login.sh`。
+
+`deploy.sh` 自动检测到 RHEL 家族会按 dnf 的包名报错;login.sh 装 Chromium 库时
+也会按 RHEL 包名跑(`nspr nss dbus-libs atk at-spi2-atk ...`,不是 Ubuntu 的
+`libnspr4 libnss3 ...`)。
+
+#### openSUSE / SLES (zypper)
+
+```bash
+sudo zypper install -y python311 python311-venv nodejs20
+```
+
+login.sh 的 Chromium 库列表也覆盖了 zypper 的包名 (`mozilla-nspr mozilla-nss
+libatk-1_0-0 ...`)。
+
+#### 其他发行版
+
+`detect_distro` 报 `other` 时,deploy.sh / login.sh 不会自动跑包管理器,而是
+建议你跑 Playwright 自带的安装器:
+
+```bash
+sudo .venv/bin/playwright install-deps chromium
+```
+
+Playwright 认得的发行版比我们这个脚本更多。
+
 如果目标机没桌面或不能联网,看 `docs/cookie-refresh-runbook.md` 的 "Fallback" 段。
 
 ---

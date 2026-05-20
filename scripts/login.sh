@@ -49,6 +49,31 @@ ok()     { printf '\033[1;32m✓\033[0m %s\n' "$*"; }
 warn()   { printf '\033[1;33m!\033[0m %s\n' "$*" >&2; }
 fail()   { printf '\033[1;31m✗\033[0m %s\n' "$*" >&2; exit 1; }
 
+# Detect the host's distro family so we can pick the right package manager
+# command and the right package names for Chromium's shared libs. Reads
+# /etc/os-release (set by every modern systemd distro). Output is one of:
+#   debian  — Debian, Ubuntu, Linux Mint, etc (apt-get)
+#   rhel    — RHEL, CentOS, Rocky, AlmaLinux, Fedora (dnf)
+#   suse    — openSUSE Leap/Tumbleweed, SLES (zypper)
+#   other   — anything we don't have a package list for; operator handles
+detect_distro() {
+    if [ -r /etc/os-release ]; then
+        # shellcheck disable=SC1091
+        . /etc/os-release
+        for tag in "${ID:-}" ${ID_LIKE:-}; do
+            case "$tag" in
+                debian|ubuntu)
+                    echo "debian"; return ;;
+                rhel|centos|rocky|almalinux|fedora)
+                    echo "rhel"; return ;;
+                suse|opensuse|opensuse-leap|opensuse-tumbleweed|sles)
+                    echo "suse"; return ;;
+            esac
+        done
+    fi
+    echo "other"
+}
+
 confirm() {
     if [ "$YES" -eq 1 ] || [ ! -t 0 ]; then return 0; fi
     local prompt="$1"
@@ -92,26 +117,65 @@ else
         warn "Playwright's bundled Chromium is missing shared libraries:"
         echo "$MISSING" | sed 's/^/      /' >&2
 
-        # Ubuntu 24.04 / Debian package set — covers what Chromium needs to
-        # render. RHEL / CentOS hosts may have different package names; if
-        # apt-get fails, follow docs/cookie-refresh-runbook.md.
-        APT_PKGS=(
-            libnspr4 libnss3 libdbus-1-3 libatk1.0-0t64 libatk-bridge2.0-0t64
-            libcups2t64 libdrm2 libgbm1 libxkbcommon0 libpango-1.0-0 libcairo2
-            libasound2t64 libatspi2.0-0t64 libxcomposite1 libxdamage1 libxfixes3
-            libxrandr2 libxshmfence1
-        )
+        # Package name lists per distro family. Chromium's runtime needs the
+        # same set of libs everywhere (nspr/nss/atk/cairo/pango/alsa/etc), but
+        # the package naming convention differs across distros. Keep these
+        # lists in sync if Playwright's Chromium bumps its lib requirements.
+        DISTRO=$(detect_distro)
+        case "$DISTRO" in
+            debian)
+                PKG_LIST=(
+                    libnspr4 libnss3 libdbus-1-3 libatk1.0-0t64 libatk-bridge2.0-0t64
+                    libcups2t64 libdrm2 libgbm1 libxkbcommon0 libpango-1.0-0 libcairo2
+                    libasound2t64 libatspi2.0-0t64 libxcomposite1 libxdamage1 libxfixes3
+                    libxrandr2 libxshmfence1
+                )
+                INSTALL_CMD=(sudo apt-get install -y)
+                ;;
+            rhel)
+                # CentOS Stream 9 / RHEL 9 / Rocky 9 / AlmaLinux 9. Some libs
+                # (libxshmfence) live in EPEL or CRB on minimal installs — if
+                # dnf reports "No match for argument", enable CRB via:
+                #   sudo dnf config-manager --set-enabled crb
+                # then re-run. We don't auto-enable CRB because some sites lock
+                # repo enablement behind change control.
+                PKG_LIST=(
+                    nspr nss dbus-libs atk at-spi2-atk cups-libs libdrm mesa-libgbm
+                    libxkbcommon pango cairo alsa-lib at-spi2-core libXcomposite
+                    libXdamage libXfixes libXrandr libxshmfence
+                )
+                INSTALL_CMD=(sudo dnf install -y)
+                ;;
+            suse)
+                PKG_LIST=(
+                    mozilla-nspr mozilla-nss libdbus-1-3 libatk-1_0-0
+                    libatk-bridge-2_0-0 libcups2 libdrm2 libgbm1 libxkbcommon0
+                    libpango-1_0-0 libcairo2 libasound2 libatspi0
+                    libXcomposite1 libXdamage1 libXfixes3 libXrandr2 libxshmfence1
+                )
+                INSTALL_CMD=(sudo zypper install -y)
+                ;;
+            other)
+                warn "Unknown distro (no /etc/os-release ID match). Can't auto-install Chromium deps."
+                echo ""
+                echo "    Try Playwright's own installer (knows more distros than we do):"
+                echo "      sudo $VENV/bin/playwright install-deps chromium"
+                echo "    or see docs/cookie-refresh-runbook.md for the manual lib list."
+                fail "Install the deps yourself and re-run scripts/login.sh."
+                ;;
+        esac
 
         echo ""
+        echo "    Detected distro family: $DISTRO"
         echo "    Need to run:"
-        echo "      sudo apt-get install -y ${APT_PKGS[*]}"
+        echo "      ${INSTALL_CMD[*]} ${PKG_LIST[*]}"
         echo "    (sudo will prompt for your password on this terminal.)"
         if ! confirm "Run it now?"; then
             fail "Declined. Install the deps yourself and re-run scripts/login.sh."
         fi
 
-        sudo apt-get install -y "${APT_PKGS[@]}" \
-            || fail "apt-get install failed. Fix manually and re-run."
+        "${INSTALL_CMD[@]}" "${PKG_LIST[@]}" \
+            || fail "Package install failed. Fix manually and re-run. (On RHEL 9 minimal: \`sudo dnf config-manager --set-enabled crb\` may be needed before retry.)"
 
         STILL_MISSING=$(chrome_missing_libs)
         if [ -n "$STILL_MISSING" ]; then
@@ -119,7 +183,7 @@ else
             echo "$STILL_MISSING" | sed 's/^/      /' >&2
             fail "Chromium still can't load. Try: sudo $VENV/bin/playwright install-deps chromium (or see docs/cookie-refresh-runbook.md)."
         fi
-        ok "Chromium deps installed and verified"
+        ok "Chromium deps installed and verified ($DISTRO family)"
     else
         ok "Playwright Chromium deps look fine ($CHROME_BIN)"
     fi
