@@ -57,11 +57,18 @@ notebooklm-py 的 `NotebookLMClient` 是 "single event loop async re-entrant, no
 
 **`scripts/start-web.sh` 里硬编码 `--workers 1` 并加注释解释**。任何 PR 想改成多 worker → 直接 reject。
 
-### 3.2 端口固定 5175 / 8002
-- `frontend/vite.config.ts`: `port: 5175, strictPort: true`
-- `scripts/start-web.sh`: `BACKEND_PORT=8002` `FRONTEND_PORT=5175`
-
-冲突时报错退出,不允许 vite 自动迁移到 5176。
+### 3.2 端口起始 5175 / 8002,自动递增 ≤ 10 次
+- `.env` 里的 `BACKEND_PORT` / `FRONTEND_PORT` 是**起始**端口,默认 `8002` / `5175`
+- `scripts/start-web.sh` 在 `[start, start+9]` 范围 probe,选第一个空闲端口;10 个都占
+  就清晰报错 exit 1
+- 选定的端口写到项目根的 `.runtime-ports.json`(gitignored);`stop-web.sh` /
+  `status-web.sh` / `frontend/vite.config.ts` 全部跟着这个文件走 — 前端 proxy 也指向
+  实际选定的 backend 端口(不是写死的 8002)
+- `vite.config.ts` 仍然 `strictPort: true`:端口 probe 是 shell 脚本的事,vite 自己
+  不允许"silently bump to 5176",否则日志和 banner 会跟实际端口对不上
+- 想把"起始端口"换地方:改 `.env` 里的 `BACKEND_PORT=9100`、重启 start-web.sh 即可;
+  不要再回头改 start-web.sh / stop-web.sh / status-web.sh / vite.config.ts 里的常量
+  (它们已经不再持有硬编码了)
 
 ### 3.3 所有路由 `async`
 任何 `def`(同步)的路由 / 中间件,review 必须打回。一个同步 handler 会卡住整个 event loop,所有用户同时受影响。

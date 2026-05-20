@@ -15,9 +15,23 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 BACKEND_PID_FILE="$PROJECT_ROOT/.backend.pid"
 FRONTEND_PID_FILE="$PROJECT_ROOT/.frontend.pid"
+RUNTIME_PORTS_FILE="$PROJECT_ROOT/.runtime-ports.json"
 
-BACKEND_PORT=8002
-FRONTEND_PORT=5175
+# Read the ports start-web.sh actually picked (it may have auto-incremented past
+# the .env starting port). Fall back to .env / defaults if the runtime file is
+# missing, e.g. start-web.sh was never run on this checkout.
+if [ -f "$RUNTIME_PORTS_FILE" ]; then
+    BACKEND_PORT=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['backend_port'])" "$RUNTIME_PORTS_FILE" 2>/dev/null || echo "")
+    FRONTEND_PORT=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['frontend_port'])" "$RUNTIME_PORTS_FILE" 2>/dev/null || echo "")
+fi
+if [ -z "${BACKEND_PORT:-}" ] || [ -z "${FRONTEND_PORT:-}" ]; then
+    if [ -f "$PROJECT_ROOT/.env" ]; then
+        # shellcheck disable=SC1091
+        set -a; source "$PROJECT_ROOT/.env"; set +a
+    fi
+    : "${BACKEND_PORT:=8002}"
+    : "${FRONTEND_PORT:=5175}"
+fi
 
 # ── Helper: kill a PID + its process group, with graceful fallback ─
 kill_tree() {
@@ -114,5 +128,9 @@ stop_one() {
 
 stop_one "$BACKEND_PID_FILE"  "$BACKEND_PORT"  "backend"
 stop_one "$FRONTEND_PID_FILE" "$FRONTEND_PORT" "frontend"
+
+# Clear runtime ports file so the next start-web.sh begins from .env / defaults
+# instead of inheriting whatever increment we ended up with last time.
+rm -f "$RUNTIME_PORTS_FILE"
 
 echo "Done."

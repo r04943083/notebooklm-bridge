@@ -266,7 +266,10 @@ say "Step 7/7 — done. Next steps:"
 cat <<'EOF'
 
   1. Start the dev servers:
-       scripts/start-web.sh           # backend :8002, frontend :5175
+       scripts/start-web.sh           # default :8002 / :5175; if busy, auto-
+                                      # increments up to 10 times — see the
+                                      # printed banner or .runtime-ports.json
+                                      # for the actual numbers
        scripts/status-web.sh          # supervisor + ports + log tail
        scripts/stop-web.sh
 

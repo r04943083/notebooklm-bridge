@@ -53,9 +53,35 @@ for d in secrets state .venv; do
 done
 
 # -- Refresh the venv: reinstall from new wheels/ -------------------------
+# If a fresh venv is needed, find a 3.11 interpreter the same way deploy.sh does
+# so a host with both 3.9 and 3.11 installed doesn't accidentally pick 3.9 and
+# then choke on the cp311 wheels.
+find_python311() {
+    local candidate
+    if [ -n "${PYTHON_BIN:-}" ]; then
+        if "$PYTHON_BIN" -c 'import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)' 2>/dev/null; then
+            echo "$PYTHON_BIN"; return 0
+        fi
+        echo "ERROR: PYTHON_BIN=$PYTHON_BIN does not point at Python >= 3.11" >&2
+        return 1
+    fi
+    for candidate in python3.11 python3.12 python3; do
+        if command -v "$candidate" >/dev/null 2>&1 \
+           && "$candidate" -c 'import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)' 2>/dev/null; then
+            echo "$candidate"; return 0
+        fi
+    done
+    return 1
+}
+
 if [ ! -d .venv ]; then
-    echo "→ No .venv carried over, creating a fresh one"
-    python3 -m venv .venv
+    PY=$(find_python311) || {
+        echo "ERROR: need Python >= 3.11 to create the venv. Install python3.11" >&2
+        echo "       or set PYTHON_BIN=/full/path/to/python3.11 and re-run." >&2
+        exit 1
+    }
+    echo "→ No .venv carried over, creating a fresh one with $PY"
+    "$PY" -m venv .venv
 fi
 echo "→ Reinstalling backend from new wheels/"
 .venv/bin/pip install --quiet --no-index --find-links wheels/ --upgrade \

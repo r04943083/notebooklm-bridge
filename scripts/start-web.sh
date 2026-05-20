@@ -19,19 +19,25 @@ BACKEND_PID_FILE="$PROJECT_ROOT/.backend.pid"
 FRONTEND_PID_FILE="$PROJECT_ROOT/.frontend.pid"
 BACKEND_LOG="$PROJECT_ROOT/.backend.log"
 FRONTEND_LOG="$PROJECT_ROOT/.frontend.log"
-
-# Port pinning is a HARD requirement, see CLAUDE.md §3.2.
-BACKEND_PORT=8002
-FRONTEND_PORT=5175
+RUNTIME_PORTS_FILE="$PROJECT_ROOT/.runtime-ports.json"
 
 # Load .env so the supervised uvicorn process inherits NOTEBOOKLM_AUTH_JSON,
-# STATE_JSON, INTERNAL_FRONTEND_ORIGIN, etc.
+# STATE_JSON, INTERNAL_FRONTEND_ORIGIN, etc. — and so BACKEND_PORT / FRONTEND_PORT
+# from .env (if set) become the starting ports for the probe below.
 if [ -f "$PROJECT_ROOT/.env" ]; then
     set -a
     # shellcheck disable=SC1091
     source "$PROJECT_ROOT/.env"
     set +a
 fi
+
+# Starting ports — see CLAUDE.md §3.2. If the starting port is busy, find_free_port
+# scans up to MAX_PORT_TRIES-1 increments before giving up. The chosen ports are
+# written to .runtime-ports.json so stop-web.sh / status-web.sh / vite see the
+# same numbers.
+: "${BACKEND_PORT:=8002}"
+: "${FRONTEND_PORT:=5175}"
+MAX_PORT_TRIES=10
 
 # Parse options
 HOST="0.0.0.0"
@@ -63,49 +69,58 @@ port_holder_info() {
     echo "${pid}|${cmd}|${cwd}"
 }
 
-# ── Helper: ensure $port is free; respect --force scope ───
-ensure_port_free() {
-    local port="$1"
+# ── Helper: find a free port in [start_port, start_port+MAX_PORT_TRIES-1] ─
+# stdout: chosen port (caller captures via $(...))
+# stderr: per-iteration diagnostics so the operator sees what got skipped
+# rc 1: range exhausted
+#
+# --force semantics: only at i==0 (the starting port). If the start port is held
+# by a process whose cwd is inside this project, --force will SIGTERM/SIGKILL it
+# and use that port — keeping the "primary" port stable when this project's own
+# stale instance is the only blocker. For i>0 we always skip-and-try-next (we
+# don't want --force killing arbitrary processes mid-scan).
+find_free_port() {
+    local start_port="$1"
     local label="$2"
+    local i port info holder_pid holder_cmd holder_cwd
 
-    local info; info=$(port_holder_info "$port")
-    if [ -z "$info" ]; then
-        return 0
-    fi
+    for ((i=0; i<MAX_PORT_TRIES; i++)); do
+        port=$((start_port + i))
+        info=$(port_holder_info "$port")
 
-    local holder_pid holder_cmd holder_cwd
-    holder_pid=$(echo "$info" | cut -d'|' -f1)
-    holder_cmd=$(echo "$info" | cut -d'|' -f2)
-    holder_cwd=$(echo "$info" | cut -d'|' -f3)
-
-    echo "Port $port (needed for $label) is already in use:"
-    echo "  PID:     $holder_pid"
-    echo "  cmdline: $holder_cmd"
-    echo "  cwd:     $holder_cwd"
-
-    if [ "$FORCE" -eq 1 ] && [[ "$holder_cwd" == "$PROJECT_ROOT" || "$holder_cwd" == "$PROJECT_ROOT"/* ]]; then
-        echo "  --force enabled and holder is from this project; sending SIGTERM."
-        kill -TERM "$holder_pid" 2>/dev/null || true
-        for _ in 1 2 3 4 5; do
-            kill -0 "$holder_pid" 2>/dev/null || break
-            sleep 1
-        done
-        kill -KILL "$holder_pid" 2>/dev/null || true
-        sleep 1
-        if [ -n "$(port_holder_info "$port")" ]; then
-            echo "Error: still occupied after force kill." >&2
-            exit 1
+        if [ -z "$info" ]; then
+            echo >&2 "Port $port free for $label"
+            echo "$port"
+            return 0
         fi
-        return 0
-    fi
 
-    if [[ "$holder_cwd" == "$PROJECT_ROOT" || "$holder_cwd" == "$PROJECT_ROOT"/* ]]; then
-        echo "Hint: holder belongs to this project — re-run with --force to auto-kill it."
-    else
-        echo "Hint: holder belongs to a DIFFERENT project; not touching it."
-        echo "      Stop it manually if you really want this port:  kill $holder_pid"
-    fi
-    exit 1
+        holder_pid=$(echo "$info" | cut -d'|' -f1)
+        holder_cmd=$(echo "$info" | cut -d'|' -f2)
+        holder_cwd=$(echo "$info" | cut -d'|' -f3)
+
+        if [ "$i" -eq 0 ] && [ "$FORCE" -eq 1 ] \
+           && [[ "$holder_cwd" == "$PROJECT_ROOT" || "$holder_cwd" == "$PROJECT_ROOT"/* ]]; then
+            echo >&2 "Port $port held by this project (PID $holder_pid); --force enabled, SIGTERM"
+            kill -TERM "$holder_pid" 2>/dev/null || true
+            for _ in 1 2 3 4 5; do
+                kill -0 "$holder_pid" 2>/dev/null || break
+                sleep 1
+            done
+            kill -KILL "$holder_pid" 2>/dev/null || true
+            sleep 1
+            if [ -z "$(port_holder_info "$port")" ]; then
+                echo >&2 "Port $port freed by --force; using it for $label"
+                echo "$port"
+                return 0
+            fi
+        fi
+
+        echo >&2 "Port $port busy for $label (PID $holder_pid, cwd: $holder_cwd); trying next"
+    done
+
+    local end=$((start_port + MAX_PORT_TRIES - 1))
+    echo >&2 "ERROR: no free port for $label in [$start_port, $end] after $MAX_PORT_TRIES tries"
+    return 1
 }
 
 # ── Helper: handle stale PID files ────────────────────────
@@ -126,8 +141,16 @@ cleanup_stale_pidfile() {
 
 cleanup_stale_pidfile "$BACKEND_PID_FILE" "backend"
 cleanup_stale_pidfile "$FRONTEND_PID_FILE" "frontend"
-ensure_port_free "$BACKEND_PORT" "backend"
-ensure_port_free "$FRONTEND_PORT" "frontend"
+
+SELECTED_BACKEND_PORT=$(find_free_port "$BACKEND_PORT" "backend")  || exit 1
+SELECTED_FRONTEND_PORT=$(find_free_port "$FRONTEND_PORT" "frontend") || exit 1
+
+# Persist selected ports so stop-web.sh / status-web.sh / vite.config.ts see
+# the same numbers we picked here.
+cat > "$RUNTIME_PORTS_FILE" <<EOF
+{"backend_port": $SELECTED_BACKEND_PORT, "frontend_port": $SELECTED_FRONTEND_PORT}
+EOF
+echo "Runtime ports written to $RUNTIME_PORTS_FILE"
 
 # ── Truncate logs (fresh start) ───────────────────────────
 : > "$BACKEND_LOG"
@@ -138,11 +161,11 @@ ensure_port_free "$FRONTEND_PORT" "frontend"
 # single-event-loop async re-entrant object and is NOT thread-safe. Multiple
 # workers would create separate clients with split cookies / keepalive /
 # rate-limit counters / breaker state. See CLAUDE.md §3.1 and plan.md.
-echo "Starting backend (host=$HOST, port=$BACKEND_PORT) ..."
+echo "Starting backend (host=$HOST, port=$SELECTED_BACKEND_PORT) ..."
 cd "$PROJECT_ROOT"
 "$SCRIPT_DIR/_supervise.sh" backend "$BACKEND_LOG" -- \
     uvicorn backend.app:app \
-        --host "$HOST" --port "$BACKEND_PORT" \
+        --host "$HOST" --port "$SELECTED_BACKEND_PORT" \
         --workers 1 \
         --reload \
         --reload-dir backend \
@@ -152,9 +175,13 @@ echo "$BACKEND_PID" > "$BACKEND_PID_FILE"
 echo "  Backend supervisor PID: $BACKEND_PID  (log: $BACKEND_LOG)"
 
 # ── Frontend (vite under supervisor) ──────────────────────
+# Tell vite.config.ts which ports we picked so its proxy points at the right
+# backend and its dev server binds the right port.
 if [ -d "$PROJECT_ROOT/frontend" ]; then
-    echo "Starting frontend (port=$FRONTEND_PORT) ..."
+    echo "Starting frontend (port=$SELECTED_FRONTEND_PORT) ..."
     cd "$PROJECT_ROOT/frontend"
+    export VITE_BACKEND_PORT="$SELECTED_BACKEND_PORT"
+    export VITE_PORT="$SELECTED_FRONTEND_PORT"
     "$SCRIPT_DIR/_supervise.sh" frontend "$FRONTEND_LOG" -- \
         npm run dev &
     FRONTEND_PID=$!
@@ -166,10 +193,10 @@ fi
 
 echo ""
 echo "Done. Open in browser:"
-echo "  Local:   http://localhost:$FRONTEND_PORT"
+echo "  Local:   http://localhost:$SELECTED_FRONTEND_PORT"
 if [ "$HOST" != "127.0.0.1" ]; then
     for ip in $(hostname -I 2>/dev/null); do
-        echo "  Network: http://${ip}:$FRONTEND_PORT"
+        echo "  Network: http://${ip}:$SELECTED_FRONTEND_PORT"
     done
 fi
 echo ""

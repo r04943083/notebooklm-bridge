@@ -11,6 +11,22 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+RUNTIME_PORTS_FILE="$PROJECT_ROOT/.runtime-ports.json"
+
+# Read the ports start-web.sh actually picked. Fall back to .env / defaults if
+# the runtime file is missing (e.g. start-web.sh has never run on this checkout).
+if [ -f "$RUNTIME_PORTS_FILE" ]; then
+    BACKEND_PORT=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['backend_port'])" "$RUNTIME_PORTS_FILE" 2>/dev/null || echo "")
+    FRONTEND_PORT=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['frontend_port'])" "$RUNTIME_PORTS_FILE" 2>/dev/null || echo "")
+fi
+if [ -z "${BACKEND_PORT:-}" ] || [ -z "${FRONTEND_PORT:-}" ]; then
+    if [ -f "$PROJECT_ROOT/.env" ]; then
+        # shellcheck disable=SC1091
+        set -a; source "$PROJECT_ROOT/.env"; set +a
+    fi
+    : "${BACKEND_PORT:=8002}"
+    : "${FRONTEND_PORT:=5175}"
+fi
 
 report_one() {
     local label="$1"
@@ -61,5 +77,5 @@ report_one() {
     echo
 }
 
-report_one "backend"  "$PROJECT_ROOT/.backend.pid"  8002 "$PROJECT_ROOT/.backend.log"
-report_one "frontend" "$PROJECT_ROOT/.frontend.pid" 5175 "$PROJECT_ROOT/.frontend.log"
+report_one "backend"  "$PROJECT_ROOT/.backend.pid"  "$BACKEND_PORT"  "$PROJECT_ROOT/.backend.log"
+report_one "frontend" "$PROJECT_ROOT/.frontend.pid" "$FRONTEND_PORT" "$PROJECT_ROOT/.frontend.log"

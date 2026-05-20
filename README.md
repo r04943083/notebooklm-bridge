@@ -50,8 +50,10 @@ A self-contained **internal bridge**, *not* a SaaS:
 - The bridge host must be able to reach `https://notebooklm.google.com`.
 - Exactly **one** uvicorn worker — `notebooklm-py` is async re-entrant but
   not thread-safe, so multiple workers would shred the shared client.
-- Ports are pinned: backend **`:8002`**, frontend **`:5175`** (`strictPort:
-  true`). They match the convention of sibling tools in the same workspace.
+- Starting ports: backend **`:8002`**, frontend **`:5175`** (match sibling
+  tools in the same workspace). `start-web.sh` probes `[start, start+9]` and
+  picks the first free port; vite is `strictPort: true` so the dev server
+  never silently bumps on its own — probing is the shell script's job.
 - Cookies and the shared HTTP secret never enter the repo or release
   tarball — the operator places them on the target host out-of-band.
 
@@ -127,9 +129,11 @@ local history survives if they come back.
 | UI primitives | Radix UI (Dialog / Popover / Dropdown / ScrollArea / Tooltip), Tailwind v4 | — |
 | Tests | pytest + pytest-asyncio + asgi-lifespan + httpx | `>=8`, `>=0.24`, `>=2.1` |
 
-Backend on **`:8002`**, frontend on **`:5175`** (`strictPort: true` /
-`--port 8002` hard-coded per `CLAUDE.md` §3.2 — both fail loudly on conflict
-rather than silently shifting to the next port).
+Backend starts at **`:8002`**, frontend at **`:5175`** (`CLAUDE.md` §3.2).
+`start-web.sh` auto-increments up to +9 if the starting port is busy; vite
+itself is `strictPort: true` so the dev server never silently shifts on its
+own (the shell script owns the probing). Actual selected ports live in
+`.runtime-ports.json`.
 
 ---
 
@@ -189,6 +193,13 @@ rather than silently shifting to the next port).
 a desktop environment (GNOME / KDE / XFCE / …), outbound access to
 `google.com` and `cdn.playwright.dev`, Python ≥ 3.11, Node ≥ 18.
 
+> **Multiple Python versions on the host?** If the system default `python3`
+> is older than 3.11 but `python3.11` is also installed, `deploy.sh` /
+> `update.sh` auto-pick the newer one (probe order: `python3.11 → python3.12
+> → python3`). If `python3.11` lives outside `$PATH`, override with
+> `PYTHON_BIN=/full/path/to/python3.11 bash deploy.sh`. See
+> [`scripts/README_DEPLOY.md`](scripts/README_DEPLOY.md) §1.1.
+
 ```bash
 # 1. Unpack the release tarball
 tar -xzf notebooklm-bridge-v1.0.3.tar.gz
@@ -209,11 +220,32 @@ bash scripts/start-web.sh
 Verify:
 
 ```bash
+# Default backend port is 8002. If 8002 was busy when start-web.sh ran, it
+# auto-incremented up to +9 (so 8003, 8004, …); the actual port is in
+# .runtime-ports.json or shown by `bash scripts/status-web.sh`.
 curl -s http://localhost:8002/api/healthz | jq
 # Expect: { "auth_valid": true, "inflight_asks": 0, "circuit_open": false, ... }
 ```
 
-Then open `http://<deploy-host>:5175` in a LAN browser.
+Then open `http://<deploy-host>:5175` in a LAN browser (frontend port follows
+the same auto-increment rule).
+
+### Ports — start-web.sh auto-increments if busy
+
+`BACKEND_PORT` / `FRONTEND_PORT` in `.env` are **starting** ports (defaults
+8002 / 5175). At launch, `start-web.sh` probes `[start, start+9]` and picks
+the first free port for each service. The chosen pair is persisted in
+`.runtime-ports.json` so `stop-web.sh` / `status-web.sh` / the frontend's
+vite proxy all use the same numbers.
+
+- Want a different starting port? Edit `.env`, restart. Do **not** edit
+  the constants in `start-web.sh` / `vite.config.ts` / `stop-web.sh` —
+  they no longer hold hard-coded ports.
+- All 10 candidate ports busy? `start-web.sh` exits non-zero with a clear
+  message; pick a different `BACKEND_PORT` in `.env` or free up the range.
+- `start-web.sh --force` can kill a stale process **from this project**
+  holding the starting port. It will not touch processes from other
+  projects (those just trigger the auto-increment fall-through).
 
 ### When cookies expire
 
@@ -332,7 +364,8 @@ All env vars are loaded from `.env` (gitignored). Defaults from
 | `STATE_JSON` | *(required)* | Absolute path to the session-persistence JSON file. |
 | `INTERNAL_FRONTEND_ORIGIN` | *(required)* | Single origin for FastAPI CORS allow-list. No wildcards (`CLAUDE.md` §3.6). |
 | `BACKEND_HOST` | `0.0.0.0` | uvicorn bind host. |
-| `BACKEND_PORT` | `8002` | uvicorn bind port (pinned). |
+| `BACKEND_PORT` | `8002` | Starting backend port — `start-web.sh` auto-increments up to +9 if busy and writes the selected value to `.runtime-ports.json`. |
+| `FRONTEND_PORT` | `5175` | Starting frontend port — same auto-increment rule; read by `vite.config.ts` via `VITE_PORT` exported by `start-web.sh`. |
 | `NOTEBOOKLM_KEEPALIVE_SECONDS` | `1800` | How often the keepalive task pokes upstream to keep cookies fresh. |
 | `MAX_INFLIGHT_ASKS` | `8` | Global semaphore cap on concurrent `ask()` calls. |
 | `RATE_LIMIT_PER_MINUTE` | `10` | Token-bucket refill rate, per user. |
@@ -412,7 +445,8 @@ paths via `BACKEND_LOG` and `FRONTEND_LOG` env vars before calling
 
 - Cookies expired / `auth_valid=false`: [`docs/cookie-refresh-runbook.md`](docs/cookie-refresh-runbook.md)
 - Unexpected upstream errors / breaker won't close: [`docs/upstream-breakage-runbook.md`](docs/upstream-breakage-runbook.md)
-- Port in use: `scripts/start-web.sh --force` (only kills if cwd matches this project)
+- Starting port busy: `start-web.sh` auto-increments up to +9; `--force` kills a stale process **from this project** holding the starting port (won't touch other projects). All 10 candidates busy → change `BACKEND_PORT` in `.env`.
+- Multiple Python versions on the host (3.9 + 3.11): set `PYTHON_BIN=/path/to/python3.11` before `deploy.sh` / `update.sh`. See `scripts/README_DEPLOY.md` §1.1.
 
 ---
 

@@ -23,31 +23,58 @@ cat <<'EOF'
  notebooklm-bridge — first-time deploy
 ============================================================
 Required on this host:
-  - Python 3.11+
+  - Python 3.11+          (notebooklm-py upstream is >=3.10; we pin 3.11
+                           because the offline wheels in this tarball are
+                           cp311 manylinux2014_x86_64)
   - Node 18+              (only for serving the prebuilt frontend)
   - Desktop environment + ability to reach https://notebooklm.google.com
     and https://cdn.playwright.dev (for scripts/login.sh later)
+
+Override the Python interpreter with PYTHON_BIN=/path/to/python3.11 if you
+have multiple versions installed and `python3` resolves to the wrong one.
 ============================================================
 EOF
 
 # -- Preflight ------------------------------------------------------------
-command -v python3 >/dev/null 2>&1 || { echo "ERROR: python3 not found" >&2; exit 1; }
-command -v node    >/dev/null 2>&1 || { echo "ERROR: node not found"    >&2; exit 1; }
+# Find a Python >= 3.11 interpreter. On hosts where the system default
+# `python3` is older (e.g. 3.9) but python3.11 is available as a side-install,
+# we MUST use the side-install — otherwise `python3 -m venv .venv` creates a
+# 3.9 venv and pip then refuses to install the cp311 wheels in wheels/.
+find_python311() {
+    local candidate
+    if [ -n "${PYTHON_BIN:-}" ]; then
+        if "$PYTHON_BIN" -c 'import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)' 2>/dev/null; then
+            echo "$PYTHON_BIN"; return 0
+        fi
+        echo "ERROR: PYTHON_BIN=$PYTHON_BIN does not point at Python >= 3.11" >&2
+        return 1
+    fi
+    for candidate in python3.11 python3.12 python3; do
+        if command -v "$candidate" >/dev/null 2>&1 \
+           && "$candidate" -c 'import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)' 2>/dev/null; then
+            echo "$candidate"; return 0
+        fi
+    done
+    return 1
+}
 
-PY_VER="$(python3 -c 'import sys; print("{}.{}".format(*sys.version_info[:2]))')"
-PY_MAJOR="${PY_VER%.*}"
-PY_MINOR="${PY_VER#*.}"
-if [ "$PY_MAJOR" -lt 3 ] || { [ "$PY_MAJOR" -eq 3 ] && [ "$PY_MINOR" -lt 11 ]; }; then
-    echo "ERROR: python3 must be >= 3.11 (you have $PY_VER)" >&2
+PY=$(find_python311) || {
+    echo "ERROR: need Python >= 3.11 — install python3.11 (e.g. via your distro's package manager)" >&2
+    echo "       or set PYTHON_BIN=/full/path/to/python3.11 and re-run." >&2
     exit 1
-fi
-echo "✓ python3 $PY_VER"
+}
+command -v node >/dev/null 2>&1 || { echo "ERROR: node not found" >&2; exit 1; }
+
+PY_VER="$("$PY" -c 'import sys; print("{}.{}".format(*sys.version_info[:2]))')"
+echo "✓ $PY $PY_VER ($("$PY" -c 'import sys; print(sys.executable)'))"
 echo "✓ node $(node -v)"
 
 # -- venv + offline pip install -------------------------------------------
+# If a stale .venv from an earlier (wrong-version) run exists, the operator
+# can blow it away with `rm -rf .venv` before re-running this script.
 if [ ! -d .venv ]; then
-    echo "→ Creating .venv"
-    python3 -m venv .venv
+    echo "→ Creating .venv with $PY"
+    "$PY" -m venv .venv
 fi
 echo "→ Installing backend from wheels/ (offline)"
 .venv/bin/pip install --quiet --upgrade pip
@@ -97,7 +124,8 @@ cat <<'EOF'
        bash scripts/start-web.sh          # binds 0.0.0.0 (LAN)
        bash scripts/start-web.sh --local  # binds 127.0.0.1 only
 
-  3. Verify:
+  3. Verify (default backend port 8002; if start-web.sh auto-incremented
+     because 8002 was busy, the actual port is in .runtime-ports.json):
        curl -s http://localhost:8002/api/healthz | jq
        # Expect: auth_valid=true
 ============================================================

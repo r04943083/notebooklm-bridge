@@ -187,7 +187,8 @@ cat <<'EOF'
 
       bash scripts/stop-web.sh && bash scripts/start-web.sh
 
-  Then verify:
+  Then verify (default backend port 8002; actual port — if start-web.sh had
+  to auto-increment — is in .runtime-ports.json, also shown by status-web.sh):
 
       curl -s http://localhost:8002/api/healthz | jq
       # Expect: auth_valid=true
