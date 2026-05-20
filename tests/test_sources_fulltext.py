@@ -56,7 +56,7 @@ async def test_client_unavailable_returns_503(
     app_with_fake_client.state.client = None
     resp = await client.get(FULLTEXT_URL, headers=HDR, params={"notebook_id": "nb-1"})
     assert resp.status_code == 503
-    assert "上游凭证" in resp.json()["detail"]
+    assert "登录凭证" in resp.json()["detail"]
 
 
 async def test_upstream_error_returns_503_and_trips_circuit(

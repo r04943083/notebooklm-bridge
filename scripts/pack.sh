@@ -85,11 +85,13 @@ cp frontend/package-lock.json "$STAGE/frontend/package-lock.json" 2>/dev/null ||
 cp frontend/vite.config.ts "$STAGE/frontend/vite.config.ts" 2>/dev/null || true
 cp -r frontend/public "$STAGE/frontend/public" 2>/dev/null || true
 
-# Scripts — exactly the 5 the operator runs + the supervisor helper they
+# Scripts — exactly the 6 the operator may run + the supervisor helper they
 # don't run directly. update.sh / setup.sh removed in v2.0 (see CHANGELOG).
+# check-python.sh is opt-in: operators with custom Python installs run it
+# before deploy.sh; distro-Python hosts skip it entirely.
 mkdir -p "$STAGE/scripts"
 for f in scripts/start-web.sh scripts/stop-web.sh scripts/status-web.sh \
-         scripts/_supervise.sh scripts/login.sh; do
+         scripts/_supervise.sh scripts/login.sh scripts/check-python.sh; do
     if [ -f "$f" ]; then
         cp "$f" "$STAGE/scripts/"
     fi

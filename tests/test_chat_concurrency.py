@@ -219,7 +219,7 @@ async def test_client_unavailable_returns_503(
     )
     assert r.status_code == 503
     body = r.json()
-    assert "上游凭证" in body["detail"]
+    assert "登录凭证" in body["detail"]
 
 
 async def test_persistence_across_app_restart(settings: Any, state_path: Any) -> None:

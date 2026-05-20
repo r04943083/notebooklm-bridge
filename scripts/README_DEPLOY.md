@@ -35,6 +35,31 @@ dist/notebooklm-bridge-v<VERSION>.tar.gz.sha256
 PYTHON_BIN=/opt/python3.12/bin/python3.12 bash deploy.sh
 ```
 
+#### 自建 / devtoolset Python(`scripts/check-python.sh`)
+
+如果你的 Python 是自编译的、或装在 `/opt/devtoolset/python-3.X.Y/` 这种和 OpenSSL
+绑在一起的 toolchain 目录里,它的 `libpython3.X.so` 和 `libssl.so.1.1` 大概率不
+在系统 ldconfig 搜索路径里 — 直接跑会卡在:
+
+- `error while loading shared libraries: libpython3.11.so.1.0: cannot open …`
+- `import ssl` 失败 → pip 没法 HTTPS 到 PyPI
+
+`scripts/check-python.sh` 专门处理这种 case:接受 `--python-path=<install root>`
+或 `--python-bin=<full path>`,自动找补缺的 `.so`,验证 ssl + venv 都能用,把
+解析出的 `PYTHON_BIN + LD_LIBRARY_PATH` 写到 `$INSTALL_HOME/.python-env`。
+之后 `deploy.sh` 和 `start-web.sh` 都会 source 这个文件,运行时 `.venv/bin/python`
+也能找到 lib。
+
+```bash
+# 一次性验证 + 写入 .python-env
+bash scripts/check-python.sh --python-path=/opt/devtoolset/python-3.11.4/
+
+# 也可以直接传给 deploy.sh,它会先调 check-python.sh
+bash deploy.sh --python-path=/opt/devtoolset/python-3.11.4/
+```
+
+普通 apt/dnf/zypper 装的 Python 不需要这一步,`deploy.sh` 一句搞定。
+
 ### 1.2 按发行版的具体准备步骤
 
 `deploy.sh` 和 `scripts/login.sh` 都会读 `/etc/os-release` 自动识别发行版
@@ -197,7 +222,7 @@ bash scripts/stop-web.sh && bash scripts/start-web.sh
 | `login.sh` 报 "X server / DISPLAY not available" | 目标机没桌面 → 看 `docs/cookie-refresh-runbook.md` 的 fallback(在你工位机跑 login.sh + scp `secrets/auth.json` 到目标机) |
 | `start-web.sh` 启动慢一拍并提示 "Port 8002 busy ... trying next" | 起始端口被占,脚本自动跳到 8003 / 8004 / …;查实际端口跑 `bash scripts/status-web.sh` 或看 `.runtime-ports.json`。属预期行为,不算 bug。 |
 | `start-web.sh` 报 "no free port for backend in [8002, 8011]" | 起始端口 +9 范围全占,真没空了。要么 `.env` 里把 `BACKEND_PORT` 换到别的段(比如 9100),要么先释放些端口。`--force` 仅能杀**本项目目录下**的进程释放起始端口,不动别的项目。 |
-| `deploy.sh` 报 "no Python >= 3.11 found" | 机器装的 `python3` 太老 → 装 `python3.11` 或更新版本,或用 `PYTHON_BIN=/path/to/python3 bash deploy.sh`;详见 §1.1 |
+| `deploy.sh` 报 "no Python >= 3.11 found" | 机器装的 `python3` 太老 → 装 `python3.11` 或更新版本,或用 `PYTHON_BIN=/path/to/python3 bash deploy.sh`;自编译 Python 卡在 `libpython3.X.so` / `libssl.so.1.1` → `bash scripts/check-python.sh --python-path=...` 先验证。详见 §1.1 |
 | `deploy.sh` 报 "playwright install chromium failed" | cdn.playwright.dev 不通 → 检查防火墙/代理。已部分下载的可以手工补:`cd ~/notebooklm-bridge && .venv/bin/playwright install chromium` |
 | `login.sh` 报 "Playwright Chromium binary not found" | 不该出现 — `deploy.sh` 会先装好。若真出现:`cd ~/notebooklm-bridge && .venv/bin/playwright install chromium` |
 | 想把 install 路径换到 `/opt/notebooklm-bridge` | `NOTEBOOKLM_BRIDGE_HOME=/opt/notebooklm-bridge bash deploy.sh`(先 `sudo mkdir /opt/notebooklm-bridge && sudo chown $USER`)。换路径后所有命令(login/start-web/stop-web)都在新路径下跑。 |

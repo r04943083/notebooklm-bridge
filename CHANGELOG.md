@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] — 2026-05-20
+
+新增 `scripts/check-python.sh`,处理自编译 / devtoolset 风格 Python 的部署。
+触发点是在一台 CentOS Stream 9 上有 `/opt/devtoolset/python-3.11.4/`,直接跑
+`PYTHON_BIN=... bash deploy.sh` 两段挂:(1) 二进制找不到 `libpython3.11.so.1.0`
+(rpath 没设),(2) `import ssl` 报 `libssl.so.1.1: cannot open` — RHEL 9 默认
+OpenSSL 3.x,这个 Python 需要 1.1。两个 .so 实际都在 `/opt/devtoolset/` 下的
+sibling 目录,只是没进 ldconfig 搜索路径。
+
+### Added
+
+- `scripts/check-python.sh` — opt-in 的 Python 环境校验器。接受
+  `--python-path=<install root>` 或 `--python-bin=<full path>`,三道 probe
+  (binary loads → ssl works → venv works),失败时自动搜索缺的 `.so`
+  (`$ROOT/lib` for libpython;`/opt/devtoolset/openssl-1.*/lib`、
+  `/usr/local/openssl-1.1*/lib`、`/opt/openssl-1.1*/lib` for libssl 1.1)。
+  成功后写 `$INSTALL_HOME/.python-env`(包含 `PYTHON_BIN` + `LD_LIBRARY_PATH`)。
+- `deploy.sh` 接受 `--python-path=` / `--python-bin=` 参数,自动调
+  `check-python.sh` 验证,然后 source `.python-env` 继续 install。
+- `start-web.sh` source `.python-env`,这样 `.venv/bin/python` 在运行时
+  也能找到 self-built Python 的 `libpython.so` / sibling OpenSSL 的
+  `libssl.so.1.1`。
+
+### Changed
+
+- `deploy.sh` 在自动探测找不到 Python 时,错误信息明确指引 `check-python.sh`
+  这条路径(不只是建议 `PYTHON_BIN=...`)。
+- `deploy.sh` rsync 排除 `.python-env`,升级时保留(跟 `.env` / `state.json` /
+  `.venv/` 一致)。
+- `pack.sh` 把 `check-python.sh` 也打进 tarball。
+- `scripts/README_DEPLOY.md` §1.1 新增 "自建 / devtoolset Python" 小节。
+
+普通 Ubuntu/CentOS 用 apt/dnf 装的 Python 不受影响 — 这条路径根本不会被触发。
+
 ## [2.0.0] — 2026-05-20
 
 部署去复杂化(BREAKING):从 v1.0.x 累积的双安装路径(online + offline wheels)、

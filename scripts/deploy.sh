@@ -2,16 +2,24 @@
 # First-time install (and upgrade) on a target LAN host. Run from inside an
 # unpacked notebooklm-bridge-vX.Y.Z/ directory — or from this repo's checkout.
 #
+# Usage:
+#   bash deploy.sh                                                    # auto-detect Python
+#   bash deploy.sh --python-path=/opt/devtoolset/python-3.11.4/       # custom Python install root
+#   bash deploy.sh --python-bin=/full/path/to/python3                 # explicit binary
+#
 # What this does (idempotent — safe to re-run for upgrades):
-#   1. Find a usable Python (>=3.11, any minor — 3.11 / 3.12 / 3.13 all OK)
+#   1. (If --python-path / --python-bin given) Validate the Python via
+#      scripts/check-python.sh and persist to $INSTALL_HOME/.python-env.
+#   2. Find a usable Python (>=3.11, any minor — 3.11 / 3.12 / 3.13 all OK)
 #      and node.
-#   2. rsync source into the fixed install path (default ~/notebooklm-bridge,
+#   3. rsync source into the fixed install path (default ~/notebooklm-bridge,
 #      override with NOTEBOOKLM_BRIDGE_HOME=/path). Preserves secrets/, .env,
-#      state.json, .venv/, .runtime-ports.json, log/pid files across versions.
-#   3. Create .venv at $INSTALL_HOME/.venv and install backend from PyPI.
-#   4. Run `playwright install chromium` so login.sh has the browser ready.
-#   5. Create secrets/ (mode 700) and .env (from .env.example if missing).
-#   6. Print next steps (cd $INSTALL_HOME → login.sh → start-web.sh).
+#      state.json, .venv/, .runtime-ports.json, .python-env, log/pid files
+#      across versions.
+#   4. Create .venv at $INSTALL_HOME/.venv and install backend from PyPI.
+#   5. Run `playwright install chromium` so login.sh has the browser ready.
+#   6. Create secrets/ (mode 700) and .env (from .env.example if missing).
+#   7. Print next steps (cd $INSTALL_HOME → login.sh → start-web.sh).
 #
 # What this does NOT do — by design:
 #   * Mint Google cookies (scripts/login.sh does that — see "Next steps" below)
@@ -23,6 +31,25 @@
 #   - .venv lives under the install path, not the tarball-extract directory
 
 set -euo pipefail
+
+# -- Parse args -----------------------------------------------------------
+# --python-path / --python-bin are forwarded to scripts/check-python.sh,
+# which validates the interpreter and writes $INSTALL_HOME/.python-env that
+# this script (and start-web.sh) then source.
+PYTHON_PATH_ARG=""
+PYTHON_BIN_ARG=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --python-path=*) PYTHON_PATH_ARG="${1#*=}"; shift ;;
+        --python-path)   PYTHON_PATH_ARG="${2:?--python-path needs a value}"; shift 2 ;;
+        --python-bin=*)  PYTHON_BIN_ARG="${1#*=}"; shift ;;
+        --python-bin)    PYTHON_BIN_ARG="${2:?--python-bin needs a value}"; shift 2 ;;
+        -h|--help)
+            sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
+            exit 0 ;;
+        *) echo "Unknown option: $1 (try --help)" >&2; exit 1 ;;
+    esac
+done
 
 # deploy.sh ships at the tarball's top-level directory (pack.sh copies it there
 # from scripts/), but in the source repo it actually lives at scripts/deploy.sh.
@@ -44,6 +71,25 @@ fi
 
 INSTALL_HOME="${NOTEBOOKLM_BRIDGE_HOME:-$HOME/notebooklm-bridge}"
 
+# -- check-python.sh handoff ----------------------------------------------
+# If the operator passed --python-path / --python-bin, hand them straight to
+# check-python.sh, which validates the interpreter (incl. ssl + venv modules,
+# searches for missing libpython.so / libssl.so) and writes .python-env.
+# Then we source that file so PYTHON_BIN + LD_LIBRARY_PATH are picked up
+# below as if they'd been set in the parent shell.
+if [ -n "$PYTHON_PATH_ARG" ] || [ -n "$PYTHON_BIN_ARG" ]; then
+    args=()
+    [ -n "$PYTHON_PATH_ARG" ] && args+=(--python-path="$PYTHON_PATH_ARG")
+    [ -n "$PYTHON_BIN_ARG" ]  && args+=(--python-bin="$PYTHON_BIN_ARG")
+    echo "→ Running check-python.sh ${args[*]}"
+    bash "$HERE/scripts/check-python.sh" "${args[@]}"
+fi
+if [ -f "$INSTALL_HOME/.python-env" ]; then
+    # shellcheck disable=SC1091
+    source "$INSTALL_HOME/.python-env"
+    echo "✓ Sourced $INSTALL_HOME/.python-env (PYTHON_BIN=$PYTHON_BIN)"
+fi
+
 cat <<EOF
 ============================================================
  notebooklm-bridge — deploy
@@ -60,7 +106,9 @@ Required on this host:
   - Desktop environment + outbound HTTPS to notebooklm.google.com
     (for scripts/login.sh later)
 
-Override Python with PYTHON_BIN=/path/to/python if needed.
+Override Python with PYTHON_BIN=/path/to/python, or for unusual installs:
+  bash $0 --python-path=/opt/devtoolset/python-3.11.4/
+(See scripts/check-python.sh --help for details.)
 ============================================================
 EOF
 
@@ -96,8 +144,17 @@ ERROR: no Python >= 3.11 found on this host.
     openSUSE/SLES:  sudo zypper install -y python311 python311-venv
 
   Then re-run:  bash $0
-  Or, if your Python lives somewhere outside \$PATH:
-    PYTHON_BIN=/full/path/to/python3 bash $0
+
+  Or, if your Python lives somewhere outside \$PATH (e.g. a devtoolset
+  install at /opt/devtoolset/python-3.11.4/ that may also need a sibling
+  OpenSSL 1.1 to import ssl), let check-python.sh validate it first:
+
+    bash $HERE/scripts/check-python.sh --python-path=/full/path/to/python-3.X.Y/
+    bash $0
+
+  (check-python.sh probes ssl/venv, auto-locates missing libpython.so /
+  libssl.so.1.1, and writes \$INSTALL_HOME/.python-env that this script
+  then sources automatically.)
 EOF
     exit 1
 }
@@ -137,6 +194,7 @@ else
         --exclude='state.json' \
         --exclude='.venv/' \
         --exclude='.runtime-ports.json' \
+        --exclude='.python-env' \
         --exclude='.backend.pid' --exclude='.frontend.pid' \
         --exclude='.backend.log' --exclude='.frontend.log' \
         --exclude='__pycache__' \
