@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.5] — 2026-05-20
+
+Docs-only release. Captures a real-world lesson learned from a v1.0.4
+deploy where the operator's `.venv` was still Python 3.9 from an earlier
+v1.0.3 install.
+
+### Known issue (informational, no code change)
+
+- **Python 3.9 venvs cannot run this project, even though the source uses
+  `from __future__ import annotations` everywhere.** pydantic v2 calls
+  `typing.get_type_hints()` at BaseModel class-definition time to build
+  the validator, which forces string annotations to be eagerly evaluated.
+  On 3.9 the evaluation of `list[str] | None` (and 12 other similar
+  fields in `backend/schemas.py`) raises `TypeError: Unable to evaluate
+  type annotation`. The fix is operational, not code-level: re-create
+  `.venv` with Python 3.11, see `scripts/README_DEPLOY.md` §1.1 for the
+  `PYTHON_BIN=` override path.
+
+  This contradicts the original judgement in
+  `~/.claude/plans/plan-mode-1-python-3-9-moonlit-noodle.md` §A.2 — that
+  plan section is now annotated with a correction. The general principle:
+  any library that builds objects via runtime type introspection
+  (pydantic, FastAPI, SQLAlchemy) will bypass `__future__` lazy
+  evaluation, so "we have `from __future__ import annotations`" is **not**
+  sufficient evidence of Python-version compatibility. Actually start the
+  service against the target interpreter before claiming compatibility.
+
+### Open (deferred to a follow-up release)
+
+- `scripts/start-web.sh` runs `npm run dev` for the frontend even on the
+  deploy host, but `pack.sh` does not bundle `node_modules`. This causes a
+  `[frontend supervisor] exited (code=7)` crash-loop on freshly-deployed
+  hosts. Pre-existed since v1.0.3 — `README_DEPLOY.md` says "Node ≥ 18,
+  only used to serve `frontend/dist/`" which contradicts what the script
+  actually does. Tracked for next patch release; safe to ignore for now
+  if you only care about the backend HTTP API.
+
 ## [1.0.4] — 2026-05-20
 
 Two operational fixes for hosts with quirky environments + a new "every
