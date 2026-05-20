@@ -172,8 +172,13 @@ echo "Runtime ports written to $RUNTIME_PORTS_FILE"
 # rate-limit counters / breaker state. See CLAUDE.md §3.1 and plan.md.
 echo "Starting backend (host=$HOST, port=$SELECTED_BACKEND_PORT) ..."
 cd "$PROJECT_ROOT"
+# Call uvicorn through the venv's absolute path. A bare `uvicorn` resolves
+# via $PATH and on hosts where ~/.local/bin/uvicorn (from a stray pip-user
+# install on a different Python) shadows the venv, the backend gets launched
+# under that wrong interpreter — PEP 604 unions (`list[str] | None`) in
+# backend/schemas.py blow up at import time on Python <3.10.
 "$SCRIPT_DIR/_supervise.sh" backend "$BACKEND_LOG" -- \
-    uvicorn backend.app:app \
+    "$PROJECT_ROOT/.venv/bin/uvicorn" backend.app:app \
         --host "$HOST" --port "$SELECTED_BACKEND_PORT" \
         --workers 1 \
         --reload \

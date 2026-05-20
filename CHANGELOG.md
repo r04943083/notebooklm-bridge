@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.4] — 2026-05-20
+
+`start-web.sh` 的 backend 启动调用从裸 `uvicorn` 改成 `.venv/bin/uvicorn`
+绝对路径,堵住 v2.0.3 仍残留的"backend 跑错 Python"问题。
+
+### Fixed
+
+- **backend 不再被 `$PATH` 抢去跑错解释器**:`scripts/start-web.sh` 第 176 行
+  原本是 `uvicorn backend.app:app ...`,依赖 shell 的 PATH 解析。在 admin
+  机器上 `~/.local/bin/uvicorn`(某次 `pip install --user uvicorn` 留下的、
+  绑定到系统 Python 3.9 的脚本)排在 `.venv/bin` 之前 → backend 实际跑在
+  Python 3.9 上,import `backend/schemas.py` 时 `list[str] | None`(PEP 604,
+  3.10+)直接 `TypeError`,supervisor 5 次连崩进入 backoff,8002 端口空。
+  v2.0.3 修了 `.venv` 内容(确保里面是 3.11),但没修"谁来调它"。改用
+  `"$PROJECT_ROOT/.venv/bin/uvicorn"` 绝对路径之后,PATH 怎么乱排都没事。
+
+升级现有 install:`bash scripts/deploy.sh --python-path=<...>` 一句,然后
+`bash scripts/stop-web.sh && bash scripts/start-web.sh`。
+
 ## [2.0.3] — 2026-05-20
 
 `deploy.sh` 堵两个真实部署里踩到的坑(在一台 CentOS Stream 9 + devtoolset 机器上
