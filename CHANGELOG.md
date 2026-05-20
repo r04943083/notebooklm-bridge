@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.3] — 2026-05-20
+
+`deploy.sh` 堵两个真实部署里踩到的坑(在一台 CentOS Stream 9 + devtoolset 机器上
+admin 跑 deploy 后 start-web.sh 起不来,backend 报 `'list[str] | None'`
+要 `eval_type_backport`,frontend 报 `vite: 未找到命令`)。
+
+### Fixed
+
+- **stale .venv 自动重建**:deploy.sh 现在比对 `.venv/bin/python` 的 minor
+  版本和当前选定 `$PY` 的版本,不一致就 `rm -rf .venv` 重建。之前的逻辑只
+  检查 `bin/pip` 是否可执行,没校验 Python 版本 — 结果:首次 deploy 没带
+  `--python-path` 时 .venv 被某个旧 Python(系统 3.9)创建,第二次带
+  `--python-path=/opt/devtoolset/python-3.11.4/` 重跑,.venv 被复用、
+  只重装包,运行时 backend 依然在 3.9 上跑 → pydantic 评估 `list[str] | None`
+  类型注解时炸。
+- **frontend node_modules 自动安装**:deploy.sh 看到
+  `frontend/node_modules/.bin/vite` 不存在就跑 `npm install`。tarball 不带
+  node_modules(太大、平台相关),但 start-web.sh 跑 `npm run dev` 需要 vite。
+  之前 admin 得手工记得 `cd frontend && npm install`,漏一步 frontend 就
+  crash-loop。失败时给 taobao 镜像 fallback 提示。
+
+升级现有 install:`bash scripts/deploy.sh --python-path=<...>` 这一句就够,
+脚本会自动发现 .venv 版本不对、自动重装 frontend deps。
+
 ## [2.0.2] — 2026-05-20
 
 `scripts/login.sh` 也要 source `.python-env`。v2.0.1 改了 deploy.sh / start-web.sh

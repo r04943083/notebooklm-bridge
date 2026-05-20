@@ -215,6 +215,23 @@ if [ -d .venv ] && [ ! -x .venv/bin/pip ]; then
     rm -rf .venv
 fi
 
+# Detect a stale .venv whose Python minor version doesn't match $PY (e.g. a
+# .venv left over from a previous deploy where PYTHON_BIN wasn't set and
+# auto-detect grabbed the system python3.9). Reusing it would pip-install
+# fine but at runtime backend would crash on 3.10+ type syntax with errors
+# like "able to evaluate type annotation 'list[str] | None'".
+if [ -d .venv ] && [ -x .venv/bin/python ]; then
+    # || true so failure to run the binary (e.g. missing libs without the
+    # right LD_LIBRARY_PATH yet) doesn't bring the script down — fall
+    # through to recreate the venv in that case too.
+    venv_pyver=$(.venv/bin/python -c 'import sys; print("{}.{}".format(*sys.version_info[:2]))' 2>/dev/null || echo "broken")
+    want_pyver=$("$PY" -c 'import sys; print("{}.{}".format(*sys.version_info[:2]))')
+    if [ "$venv_pyver" != "$want_pyver" ]; then
+        echo "→ Existing .venv is Python $venv_pyver but $PY is $want_pyver — removing for clean re-create"
+        rm -rf .venv
+    fi
+fi
+
 if [ ! -d .venv ]; then
     echo "→ Creating .venv with $PY"
     # On Debian/Ubuntu the venv module ships in a separate apt package
@@ -278,6 +295,40 @@ EOF
     exit 1
 fi
 echo "✓ Playwright Chromium ready"
+
+# -- Frontend node_modules ------------------------------------------------
+# The release tarball ships frontend/package.json + frontend/dist (pre-built
+# bundle) but NOT node_modules — they're huge and platform-specific. However
+# start-web.sh launches the frontend with `npm run dev`, which requires vite
+# from node_modules. Without this step, frontend supervisor crash-loops with
+# "vite: command not found".
+#
+# Skipped when node_modules/.bin/vite already exists (idempotent upgrade).
+if [ -d frontend ]; then
+    if [ -x frontend/node_modules/.bin/vite ]; then
+        echo "✓ Frontend deps already installed (frontend/node_modules/.bin/vite present)"
+    else
+        echo "→ Installing frontend deps (cd frontend && npm install — vite is a dev dep)"
+        if ! (cd frontend && npm install); then
+            cat >&2 <<EOF
+
+ERROR: npm install in frontend/ failed.
+
+  Most common causes:
+    * registry.npmjs.org blocked → try a mirror:
+        cd $INSTALL_HOME/frontend && npm install --registry=https://registry.npmmirror.com
+    * Node version too old → install Node 18+ (deploy.sh already checked node
+      is on PATH, but some old versions can't resolve the lockfile).
+
+  Re-run after fixing:  bash $0
+EOF
+            exit 1
+        fi
+        echo "✓ Frontend deps installed"
+    fi
+else
+    echo "! frontend/ directory missing; skipping npm install"
+fi
 
 # -- secrets/ directory ---------------------------------------------------
 mkdir -p secrets
