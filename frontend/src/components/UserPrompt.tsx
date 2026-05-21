@@ -98,7 +98,7 @@ export function UserPrompt({ onSubmit }: UserPromptProps) {
               }}
               autoFocus
               maxLength={64}
-              placeholder="例如 zhangsan / 12345"
+              placeholder="例如 luyh"
               aria-invalid={err ? "true" : undefined}
               aria-describedby={err ? "user-prompt-error" : undefined}
               className="w-full rounded-md border border-input bg-background py-2 pl-9 pr-3 text-sm outline-none transition-colors focus:border-accent/40 focus:ring-2 focus:ring-ring/20"
