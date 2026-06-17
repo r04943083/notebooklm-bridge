@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.6] — 2026-06-17
+
+修复中文(非 Latin-1)登录名导致整站不可用的问题,并给 chat 路由补一条
+未识别上游异常的诊断日志。
+
+### Fixed
+
+- **中文 / emoji 登录名现在可用**。HTTP header 值只能是 ISO-8859-1,之前前端
+  把登录名原样写进 `X-User-Id`,名字含非 Latin-1 字符时浏览器 `fetch()` 在发
+  请求前就抛 `TypeError`,该用户所有 API 调用全部失败。现在前端
+  `encodeURIComponent` 编码、后端 `unquote` 解码后再校验;ASCII 名字编码后不
+  变,老用户和已有 `state.json` key 不受影响。
+
+### Changed
+
+- **`POST /api/chat`** 在上游调用处新增兜底 `except Exception`,带
+  `user_id` / `notebook_id` 记录完整 traceback 后原样 re-raise。**行为不变**
+  (仍是 500),仅为下次"并发高时偶发 500"事故留下真实异常类型,便于判断是否
+  需要纳入 `upstream_excs`。
+
 ## [2.0.5] — 2026-05-20
 
 chat history(对话列表 + 每个对话的 turns 内容)从浏览器 localStorage 搬到

@@ -48,6 +48,16 @@ async def test_invalid_user_id_returns_400(client: AsyncClient, user_id: str) ->
     assert resp.status_code in (400, 422), resp.text
 
 
+async def test_percent_encoded_chinese_user_id_passes(client: AsyncClient) -> None:
+    """A non-Latin-1 name is percent-encoded by the frontend (HTTP header values
+    must be ISO-8859-1). The backend urldecodes it before validating."""
+    resp = await client.get(
+        "/api/notebooks",
+        headers={"X-User-Id": "%E4%B8%AD%E6%96%87"},  # encodeURIComponent("中文")
+    )
+    assert resp.status_code == 200
+
+
 async def test_healthz_does_not_require_auth(client: AsyncClient) -> None:
     """Health endpoint is unauthenticated by design (runbooks need it)."""
     transport = client._transport  # type: ignore[attr-defined]

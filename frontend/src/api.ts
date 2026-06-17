@@ -61,7 +61,11 @@ export function setUserId(v: string): void {
 function authHeaders(): Record<string, string> {
   const u = getUserId();
   const h: Record<string, string> = {};
-  if (u) h["X-User-Id"] = u;
+  // HTTP header values must be ISO-8859-1; a non-Latin-1 name (e.g. 中文) makes
+  // fetch() throw synchronously and breaks every request. Percent-encode here
+  // and let the backend urldecode it. ASCII ids encode to themselves, so this
+  // is transparent for existing users.
+  if (u) h["X-User-Id"] = encodeURIComponent(u);
   return h;
 }
 

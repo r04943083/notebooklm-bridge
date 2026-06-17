@@ -10,7 +10,7 @@ the bridge talks to `notebooklm.google.com` from a host that *can* reach
 Google. A Feishu (Lark) bot adapter is planned as Phase 3 and is **not** part
 of v1.0.
 
-**Status: v2.0.5** — chat history moved to bridge backend (cross-browser visible per X-User-Id). See
+**Status: v2.0.6** — non-Latin-1 (e.g. 中文) login names now work; chat route logs unmatched upstream errors. See
 [`CHANGELOG.md`](CHANGELOG.md). Project-wide engineering rules (no AI
 signatures in commits, `--workers 1` lock, port pinning, etc.) live in
 [`CLAUDE.md`](CLAUDE.md); the design rationale lives in [`plan.md`](plan.md).
@@ -206,8 +206,8 @@ own (the shell script owns the probing). Actual selected ports live in
 
 ```bash
 # 1. Unpack the release tarball
-tar -xzf notebooklm-bridge-v2.0.5.tar.gz
-cd notebooklm-bridge-v2.0.5
+tar -xzf notebooklm-bridge-v2.0.6.tar.gz
+cd notebooklm-bridge-v2.0.6
 
 # 2. Install (rsyncs source to ~/notebooklm-bridge, creates .venv, installs
 #    backend from PyPI, downloads Playwright Chromium ~150MB). Idempotent —
@@ -319,7 +319,7 @@ flowchart TB
 
 ```bash
 scripts/pack.sh
-# → dist/notebooklm-bridge-v2.0.5.tar.gz  (+ .sha256 sidecar)
+# → dist/notebooklm-bridge-v2.0.6.tar.gz  (+ .sha256 sidecar)
 ```
 
 The tarball bundles: backend `.py` sources, the pre-built frontend `dist/`,
@@ -333,9 +333,9 @@ minted on the target host by `scripts/login.sh`.
 ### Transferring to the bridge host
 
 ```bash
-scp dist/notebooklm-bridge-v2.0.5.tar.gz user@bridge-host:~/
-scp dist/notebooklm-bridge-v2.0.5.tar.gz.sha256 user@bridge-host:~/
-ssh user@bridge-host 'sha256sum -c notebooklm-bridge-v2.0.5.tar.gz.sha256'
+scp dist/notebooklm-bridge-v2.0.6.tar.gz user@bridge-host:~/
+scp dist/notebooklm-bridge-v2.0.6.tar.gz.sha256 user@bridge-host:~/
+ssh user@bridge-host 'sha256sum -c notebooklm-bridge-v2.0.6.tar.gz.sha256'
 ```
 
 Then follow the four-step "Quick start" above on the bridge host.

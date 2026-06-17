@@ -153,6 +153,18 @@ async def chat(
                 raise HTTPException(
                     status.HTTP_503_SERVICE_UNAVAILABLE, detail="上游异常,服务暂歇"
                 ) from e
+            except Exception:
+                # Diagnostic only — behaviour unchanged. Any exception not matched
+                # above still becomes a 500, but uvicorn's generic handler logs it
+                # without our context. Capture the full traceback + user/notebook
+                # here so the next "人一多就 500" incident shows the real exception
+                # class (which then tells us whether to add it to upstream_excs).
+                logger.exception(
+                    "unhandled chat.ask error user=%s notebook=%s",
+                    user_id,
+                    req.notebook_id,
+                )
+                raise
 
             request.app.state.last_rpc_ts = time.time()
         finally:

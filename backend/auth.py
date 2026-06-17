@@ -22,6 +22,7 @@ removed in v1.0.3.
 from __future__ import annotations
 
 from typing import Annotated
+from urllib.parse import unquote
 
 from fastapi import Header, HTTPException, status
 
@@ -32,8 +33,14 @@ _FORBIDDEN_USER_ID_CHARS = ("|", "\r", "\n", "\t", "\x00")
 async def require_internal_user(
     x_user_id: Annotated[str, Header(alias="X-User-Id")],
 ) -> str:
-    """Validate the X-User-Id header and return the canonical ``user_id``."""
-    uid = x_user_id.strip()
+    """Validate the X-User-Id header and return the canonical ``user_id``.
+
+    The frontend percent-encodes the value because HTTP header values must be
+    ISO-8859-1 — a raw non-Latin-1 name (e.g. 中文) makes the browser's fetch()
+    throw. We urldecode here before validating; ASCII ids are unaffected
+    (``unquote("luyh") == "luyh"``), so this is backward-compatible.
+    """
+    uid = unquote(x_user_id).strip()
     if not uid:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="无效 X-User-Id (empty)")
     if len(uid) > _MAX_USER_ID_LEN:
